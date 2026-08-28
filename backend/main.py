@@ -1,0 +1,1 @@
+#fastapi core server setup
