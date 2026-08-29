@@ -46,3 +46,9 @@ export interface PRAutomationResponse {
   branch: string;
   verification: VerificationResult;
 }
+
+export interface IssueContextResponse {
+  source_code: string;
+  resolved_path: string | null;
+  method: 'direct_path' | 'code_search' | 'not_found';
+}

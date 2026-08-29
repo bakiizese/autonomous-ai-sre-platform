@@ -24,6 +24,25 @@ class GitHubClient:
             response.raise_for_status()
             return response.json()
 
+    async def close_issue(self, issue_number: int, comment: str | None = None) -> Dict[str, Any]:
+        """Closes a GitHub issue, optionally posting a comment first (e.g. linking the fix PR)."""
+        async with httpx.AsyncClient() as client:
+            if comment:
+                comment_res = await client.post(
+                    f"{self.base_url}/issues/{issue_number}/comments",
+                    headers=self.headers,
+                    json={"body": comment},
+                )
+                comment_res.raise_for_status()
+
+            response = await client.patch(
+                f"{self.base_url}/issues/{issue_number}",
+                headers=self.headers,
+                json={"state": "closed"},
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def get_default_branch_sha(self) -> str:
         """Get the latest commit SHA from the main/master branch."""
         async with httpx.AsyncClient() as client:
@@ -118,6 +137,32 @@ class GitHubClient:
                 if "pull_request" not in issue
             ]
             return filtered_issues
+
+    async def get_file_content(self, file_path: str) -> str | None:
+        """Fetches and decodes a file's content from the repo's default branch. None if not found."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{self.base_url}/contents/{file_path}", headers=self.headers
+            )
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            data = response.json()
+            if data.get("encoding") != "base64":
+                return None
+            return base64.b64decode(data["content"]).decode("utf-8")
+
+    async def search_code(self, query: str) -> list[dict]:
+        """Searches the repo's code for a query string (e.g. a function name). Returns [] on any failure."""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.github.com/search/code",
+                headers=self.headers,
+                params={"q": f"{query} repo:{self.repo}"},
+            )
+            if response.status_code != 200:
+                return []
+            return response.json().get("items", [])
 
 
 github_client = GitHubClient()

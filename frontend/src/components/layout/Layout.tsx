@@ -56,7 +56,7 @@ export default function Layout() {
                 className="w-1.5 h-1.5 rounded-full animate-pulse-dot"
                 style={{ background: 'var(--status-green)' }}
               />
-              <span style={{ color: 'var(--mute)' }}>POLLER ACTIVE · 30S</span>
+              <span style={{ color: 'var(--mute)' }}>POLLER ACTIVE · 60S</span>
             </div>
             <NavLink
               to="/dashboard"

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, getIssueContext } from '../services/api';
 import PipelineRail, { type StageKey, type StageStatus } from '../components/PipelineRail';
 
 import type {
@@ -37,6 +37,13 @@ export default function Dashboard() {
   const [triageResult, setTriageResult] = useState<PipelineResult | null>(null);
   const [prResult, setPrResult] = useState<PRAutomationResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const [contextLoading, setContextLoading] = useState(false);
+  const [contextMethod, setContextMethod] = useState<
+    'direct_path' | 'code_search' | 'not_found' | null
+  >(null);
+  const [resolvedPath, setResolvedPath] = useState<string | null>(null);
+
+
 
   useEffect(() => {
     loadIssues();
@@ -55,12 +62,29 @@ export default function Dashboard() {
     }
   };
 
-  const handleSelectIssue = (issue: GitHubIssue) => {
+  const handleSelectIssue = async (issue: GitHubIssue) => {
     setSelectedIssue(issue.number);
     setErrorLog(`Issue #${issue.number}: ${issue.title}\n\n${issue.body}`);
-    setSourceCode(`def calculate_rate(total, count):\n    return total / count`);
+    setSourceCode('');
     setTriageResult(null);
     setPrResult(null);
+    setContextMethod(null);
+    setResolvedPath(null);
+
+    setContextLoading(true);
+    try {
+      const context = await getIssueContext(issue.number);
+      setContextMethod(context.method);
+      setResolvedPath(context.resolved_path);
+      if (context.source_code) {
+        setSourceCode(context.source_code);
+      }
+    } catch (err) {
+      console.error('Failed to auto-resolve source context:', err);
+      setContextMethod('not_found');
+    } finally {
+      setContextLoading(false);
+    }
   };
 
   const handleRunTriage = async () => {
@@ -175,9 +199,31 @@ export default function Dashboard() {
           </div>
 
           <div className="rounded-xl p-4 space-y-2" style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}>
-            <label className="font-mono-ui text-[11px] tracking-widest" style={{ color: 'var(--mute)' }}>
-              SOURCE CODE CONTEXT
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="font-mono-ui text-[11px] tracking-widest" style={{ color: 'var(--mute)' }}>
+                SOURCE CODE CONTEXT
+              </label>
+              {contextLoading && (
+                <span className="font-mono-ui text-[10px]" style={{ color: 'var(--mute-dim)' }}>
+                  resolving from repo…
+                </span>
+              )}
+              {!contextLoading && contextMethod === 'direct_path' && (
+                <span className="font-mono-ui text-[10px]" style={{ color: 'var(--status-green)' }}>
+                  auto-resolved · {resolvedPath}
+                </span>
+              )}
+              {!contextLoading && contextMethod === 'code_search' && (
+                <span className="font-mono-ui text-[10px]" style={{ color: 'var(--status-green)' }}>
+                  found via code search · {resolvedPath}
+                </span>
+              )}
+              {!contextLoading && contextMethod === 'not_found' && (
+                <span className="font-mono-ui text-[10px]" style={{ color: 'var(--status-amber)' }}>
+                  no match found — paste manually
+                </span>
+              )}
+            </div>
             <textarea
               rows={5}
               value={sourceCode}
