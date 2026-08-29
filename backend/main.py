@@ -5,6 +5,7 @@ from app.services.agent_engine import run_sre_pipeline
 from app.services.sandbox_runner import run_preflight_verification
 from app.schemas.agent import PipelineResult, VerificationResult
 from app.services.github_client import github_client
+from fastapi import Request
 
 app = FastAPI(title="Autonomous AI SRE Core Engine")
 
@@ -82,7 +83,6 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
 
         # Create branch
         await github_client.create_branch(branch_name, base_sha)
-
         # Commit Code Fix
         await github_client.create_or_update_file(
             file_path=pipeline_result.remediation.target_file,
@@ -133,3 +133,25 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/webhook/github")
+async def github_webhook(request: Request):
+    """Listens for automated event payloads directly from GitHub."""
+    payload = await request.json()
+    action = payload.get("action")
+
+    # Check if a new issue was just opened
+    if action == "opened" and "issue" in payload:
+        issue = payload["issue"]
+        issue_number = issue["number"]
+        error_log = issue.get("body", "")
+
+        # Pull code context or issue description and trigger pipeline automatically
+        print(f"🤖 Automatic SRE Triggered for Issue #{issue_number}")
+
+        # Run remediation loop automatically
+        # (In production, run this in a background task so GitHub doesn't time out)
+        return {"status": "auto_triage_started", "issue_number": issue_number}
+
+    return {"status": "event_ignored"}

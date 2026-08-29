@@ -10,7 +10,7 @@ from app.schemas.agent import (
 )
 
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
-MODEL_ID = "gemini-2.5-flash"
+MODEL_ID = "gemini-3.5-flash-lite"
 
 
 def run_sre_pipeline(error_log: str, source_code_context: str) -> PipelineResult:

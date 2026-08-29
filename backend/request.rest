@@ -1,10 +1,10 @@
-### Test 1: Multi-Agent Triage Pipeline (Gemini 2.5)
+### Test 1: Multi-Agent Triage Pipeline
 POST http://localhost:8000/api/triage
 Content-Type: application/json
 
 {
-  "error_log": "ZeroDivisionError: division by zero in calculate_rate at line 2",
-  "source_code_context": "def calculate_rate(total, count):\n    return total / count"
+  "error_log": "ZeroDivisionError: division by zero in calculate_rate at line 2 in math_helpers.py",
+  "source_code_context": "# math_helpers.py\ndef calculate_rate(total, count):\n    return total / count"
 }
 
 ###
@@ -14,19 +14,20 @@ POST http://localhost:8000/api/verify
 Content-Type: application/json
 
 {
-  "target_file": "calculator.py",
+  "target_file": "math_helpers.py",
   "remediated_code": "def calculate_rate(total, count):\n    if count == 0:\n        return 0.0\n    return total / count",
-  "test_file_name": "test_calculator.py",
-  "generated_test_code": "from calculator import calculate_rate\n\ndef test_calculate_rate_zero():\n    assert calculate_rate(10, 0) == 0.0\n"
+  "test_file_name": "test_math_helpers.py",
+  "generated_test_code": "from math_helpers import calculate_rate\n\ndef test_calculate_rate_zero():\n    assert calculate_rate(10, 0) == 0.0\n"
 }
 
+###
 
-### Test 3: Full Automation Loop (Triage + Verification + GitHub PR)
+### Test 3: Full Automation Loop (Mock Repo Target)
 POST http://localhost:8000/api/remediate-and-pr
 Content-Type: application/json
 
 {
   "issue_number": 1,
-  "error_log": "ZeroDivisionError: division by zero in calculate_rate at line 2",
-  "source_code_context": "def calculate_rate(total, count):\n    return total / count"
+  "error_log": "ZeroDivisionError: division by zero in calculate_rate at line 2 in math_helpers.py",
+  "source_code_context": "# math_helpers.py\ndef calculate_rate(total, count):\n    return total / count"
 }

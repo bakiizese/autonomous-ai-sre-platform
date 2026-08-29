@@ -3,6 +3,7 @@ import httpx
 from typing import Dict, Any, Optional
 from app.core.config import settings
 
+
 class GitHubClient:
     def __init__(self):
         self.token = settings.GITHUB_TOKEN
@@ -18,8 +19,7 @@ class GitHubClient:
         """Fetch details of a specific issue from the target repository."""
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"{self.base_url}/issues/{issue_number}",
-                headers=self.headers
+                f"{self.base_url}/issues/{issue_number}", headers=self.headers
             )
             response.raise_for_status()
             return response.json()
@@ -34,8 +34,7 @@ class GitHubClient:
 
             # Get reference SHA for default branch
             ref_res = await client.get(
-                f"{self.base_url}/git/ref/heads/{default_branch}",
-                headers=self.headers
+                f"{self.base_url}/git/ref/heads/{default_branch}", headers=self.headers
             )
             ref_res.raise_for_status()
             return ref_res.json()["object"]["sha"]
@@ -43,10 +42,7 @@ class GitHubClient:
     async def create_branch(self, branch_name: str, base_sha: str) -> bool:
         """Create a new git branch from base SHA."""
         url = f"{self.base_url}/git/refs"
-        payload = {
-            "ref": f"refs/heads/{branch_name}",
-            "sha": base_sha
-        }
+        payload = {"ref": f"refs/heads/{branch_name}", "sha": base_sha}
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=self.headers, json=payload)
             if response.status_code in (201, 422):  # 422 if branch already exists
@@ -55,32 +51,27 @@ class GitHubClient:
             return True
 
     async def create_or_update_file(
-        self,
-        file_path: str,
-        content: str,
-        commit_message: str,
-        branch_name: str
+        self, file_path: str, content: str, commit_message: str, branch_name: str
     ) -> Dict[str, Any]:
         """Commit a file fix or new test file to the target branch."""
         url = f"{self.base_url}/contents/{file_path}"
-        
+
         # Check if file already exists on target branch to get its SHA
         async with httpx.AsyncClient() as client:
             sha: Optional[str] = None
             existing_res = await client.get(
-                f"{url}?ref={branch_name}",
-                headers=self.headers
+                f"{url}?ref={branch_name}", headers=self.headers
             )
             if existing_res.status_code == 200:
                 sha = existing_res.json().get("sha")
 
             # Base64 encode file content
             encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
-            
+
             payload = {
                 "message": commit_message,
                 "content": encoded_content,
-                "branch": branch_name
+                "branch": branch_name,
             }
             if sha:
                 payload["sha"] = sha
@@ -90,11 +81,7 @@ class GitHubClient:
             return response.json()
 
     async def create_pull_request(
-        self,
-        title: str,
-        body: str,
-        head_branch: str,
-        base_branch: str = "main"
+        self, title: str, body: str, head_branch: str, base_branch: str = "main"
     ) -> Dict[str, Any]:
         """Open a Pull Request with AI remediation details and verification badges."""
         url = f"{self.base_url}/pulls"
@@ -102,11 +89,12 @@ class GitHubClient:
             "title": title,
             "body": body,
             "head": head_branch,
-            "base": base_branch
+            "base": base_branch,
         }
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=self.headers, json=payload)
             response.raise_for_status()
             return response.json()
+
 
 github_client = GitHubClient()
