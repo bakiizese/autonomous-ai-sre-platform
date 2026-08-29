@@ -1,29 +1,32 @@
-# 💻 Autonomous AI SRE — Developer Command Center UI
+# React + TypeScript + Vite
 
-> The human-in-the-loop developer interface for the Autonomous AI SRE Platform. Built with React, Vite, and Tailwind CSS, it provides real-time metric tracking, side-by-side colorized git diffs, test verification proof badges, and 1-click GitHub PR approval controls.
+This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
----
+Currently, two official plugins are available:
 
-## 🛠️ Tech Stack & Tools
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
-* **Core Framework:** React 18 (Vite)
-* **Styling:** Tailwind CSS
-* **Icons:** Lucide React
-* **Linting & Quality:** Oxlint & ESLint
-* **HTTP Client:** Fetch API / Axios
+## React Compiler
 
----
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-## 📂 Submodule Architecture
+## Expanding the Oxlint configuration
 
-```text
-frontend/
-├── src/
-│   ├── components/    # Reusable UI widgets (DiffViewer, TestBadges, MetricCards)
-│   ├── services/      # Backend API integration client
-│   ├── App.jsx        # Main Dashboard layout & state orchestrator
-│   ├── main.jsx       # React application entry point
-│   └── index.css      # Tailwind directives & base styling
-├── index.html         # HTML entry document
-├── package.json       # Node dependencies & execution scripts
-└── vite.config.js     # Vite configuration
+If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+
+```json
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "options": {
+    "typeAware": true
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  }
+}
+```
+
+See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.

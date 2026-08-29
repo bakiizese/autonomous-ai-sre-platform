@@ -1,0 +1,87 @@
+/* ==========================================================================
+   Sentinel SRE — Design Tokens
+   Palette: instrument-panel dark, signal-teal accent, mono-forward type.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* Surfaces */
+  --void: #0a0e13;          /* page background */
+  --panel: #131a22;         /* card / section background */
+  --panel-raised: #1c2530;  /* hover / active surface */
+  --line: #26303d;          /* borders, dividers */
+
+  /* Text */
+  --ink: #e7edf3;           /* primary text */
+  --mute: #869ab0;          /* secondary text */
+  --mute-dim: #566374;      /* tertiary / placeholder text */
+
+  /* Brand signal */
+  --signal: #2fe6c7;        /* primary accent — teal */
+  --signal-dim: #1c8f7d;    /* muted accent, e.g. connecting lines */
+  --signal-wash: rgba(47, 230, 199, 0.08);
+
+  /* Status (semantic — do not reuse for branding) */
+  --status-green: #34d399;
+  --status-amber: #fbbf24;
+  --status-red: #f87171;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+}
+
+html,
+body {
+  background: var(--void);
+  color: var(--ink);
+}
+
+body {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-mono-ui {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+::selection {
+  background: var(--signal);
+  color: var(--void);
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Subtle scanline-esque grid used behind hero sections */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, var(--line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--line) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 100%);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
