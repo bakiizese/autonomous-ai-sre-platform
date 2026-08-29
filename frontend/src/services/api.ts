@@ -4,6 +4,7 @@ import type {
   PipelineResult,
   VerificationResult,
   PRAutomationResponse,
+  IssueContextResponse,
 } from '../types/agent';
 
 const API_BASE_URL = 'http://localhost:8000';
@@ -59,3 +60,15 @@ export const api = {
     return res.data;
   },
 };
+
+
+export const getIssueContext = async (
+  issueNumber: number
+): Promise<IssueContextResponse> => {
+  const response = await client.get<IssueContextResponse>(
+    `/api/issues/${issueNumber}/context`
+  );
+  return response.data;
+};
+
+
