@@ -1,0 +1,10 @@
+# Ignore environment variables
+.env
+.env.local
+*.env
+# Root .gitignore
+venv/
+backend/venv/
+node_modules/
+frontend/node_modules/
+
