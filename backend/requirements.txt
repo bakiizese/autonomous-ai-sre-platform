@@ -2,5 +2,7 @@ fastapi
 uvicorn
 google-genai
 pydantic
+pydantic-settings
 python-dotenv
 pytest
+httpx

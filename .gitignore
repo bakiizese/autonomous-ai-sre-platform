@@ -2,9 +2,19 @@
 .env
 .env.local
 *.env
+backend/.env
+
 # Root .gitignore
 venv/
 backend/venv/
 node_modules/
 frontend/node_modules/
+
+# Python bytecode & cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
 
