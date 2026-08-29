@@ -1,8 +1,13 @@
 fastapi
-uvicorn
+uvicorn[standard]
 google-genai
 pydantic
 pydantic-settings
 python-dotenv
-pytest
 httpx
+
+# --- testing ---
+pytest
+pytest-asyncio      
+pytest-mock         
+respx        
