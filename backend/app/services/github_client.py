@@ -96,5 +96,28 @@ class GitHubClient:
             response.raise_for_status()
             return response.json()
 
+    async def list_open_issues(self) -> list[Dict[str, Any]]:
+        """Fetch open issues from the GitHub repository, excluding pull requests."""
+        url = f"{self.base_url}/issues?state=open"
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=self.headers)
+            response.raise_for_status()
+            issues = response.json()
+
+            # GitHub's /issues endpoint returns both issues and PRs.
+            # Filter out PRs (PR items contain a 'pull_request' key).
+            filtered_issues = [
+                {
+                    "number": issue["number"],
+                    "title": issue["title"],
+                    "body": issue.get("body", ""),
+                    "created_at": issue["created_at"],
+                    "html_url": issue["html_url"],
+                }
+                for issue in issues
+                if "pull_request" not in issue
+            ]
+            return filtered_issues
+
 
 github_client = GitHubClient()

@@ -6,8 +6,18 @@ from app.services.sandbox_runner import run_preflight_verification
 from app.schemas.agent import PipelineResult, VerificationResult
 from app.services.github_client import github_client
 from fastapi import Request
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Autonomous AI SRE Core Engine")
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class TriageRequest(BaseModel):
