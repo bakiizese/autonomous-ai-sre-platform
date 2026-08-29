@@ -22,7 +22,7 @@ Content-Type: application/json
 
 ###
 
-### Test 3: Full Automation Loop (Mock Repo Target)
+### Test 3: Full mation Loop (Mock Repo Target)
 POST http://localhost:8000/api/remediate-and-pr
 Content-Type: application/json
 

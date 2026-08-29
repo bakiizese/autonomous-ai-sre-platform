@@ -7,6 +7,7 @@ from app.schemas.agent import PipelineResult, VerificationResult
 from app.services.github_client import github_client
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.concurrency import run_in_threadpool
 
 app = FastAPI(title="Autonomous AI SRE Core Engine")
 
@@ -51,6 +52,17 @@ def triage_issue(request: TriageRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/issues")
+async def get_issues():
+    try:
+        issues = await github_client.list_open_issues()
+        return {"issues": issues}
+    except Exception as e:
+        raise HTTPException(
+            status_code=502, detail=f"Failed to fetch GitHub issues: {e}"
+        )
+
+
 @app.post("/api/verify", response_model=VerificationResult)
 def verify_patch(request: VerificationRequest):
     try:
@@ -69,12 +81,23 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
     """Full end-to-end automation loop: Triage -> Sandbox Verification -> GitHub PR."""
     try:
         # 1. Run Multi-Agent Triage
-        pipeline_result = run_sre_pipeline(
-            request.error_log, request.source_code_context
-        )
+        # pipeline_result = run_sre_pipeline(
+        #     request.error_log, request.source_code_context
+        # )
 
-        # 2. Run Pre-flight Sandbox Verification
-        verification = run_preflight_verification(
+        # # 2. Run Pre-flight Sandbox Verification
+        # verification = run_preflight_verification(
+        #     target_file_rel_path=pipeline_result.remediation.target_file,
+        #     remediated_code=pipeline_result.remediation.code_fix,
+        #     test_file_name=pipeline_result.test_generation.test_file_name,
+        #     generated_test_code=pipeline_result.test_generation.test_code,
+        # )
+
+        pipeline_result = await run_in_threadpool(
+            run_sre_pipeline, request.error_log, request.source_code_context
+        )
+        verification = await run_in_threadpool(
+            run_preflight_verification,
             target_file_rel_path=pipeline_result.remediation.target_file,
             remediated_code=pipeline_result.remediation.code_fix,
             test_file_name=pipeline_result.test_generation.test_file_name,
@@ -112,8 +135,6 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
         # Open PR with proof body
         pr_body = f"""## 🤖 Autonomous SRE Remediation Report
 
-                ### 🟢 Status: Pre-Flight Verification Passed
-
                 **Issue ID:** #{request.issue_number}
                 **Risk Score:** {pipeline_result.diagnosis.risk_score}/10
 
@@ -126,6 +147,7 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
                 #### 🧪 Pre-Flight Execution Log
                 ```text
                 {verification.stdout if verification.stdout else 'Pytest passed successfully in sandbox.'}
+                ```
                 """
         pr_result = await github_client.create_pull_request(
             title=f"fix(sre): automated patch for Issue #{request.issue_number}",
