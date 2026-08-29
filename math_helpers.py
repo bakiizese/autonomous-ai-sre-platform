@@ -1,4 +1,4 @@
 def calculate_rate(total, count):
-    if not count:
+    if count == 0:
         return 0.0
     return total / count
