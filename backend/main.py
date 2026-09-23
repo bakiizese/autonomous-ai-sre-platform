@@ -4,177 +4,64 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import text
 
-from app.core.config import settings
-from app.services.agent_engine import run_sre_pipeline, to_pipeline_result
-from app.services.sandbox_runner import run_preflight_verification
-from app.schemas.agent import PipelineResult, VerificationResult
-from app.services.github_client import github_client
-from app.services.email_service import send_critical_alert
-from app.services.context_resolver import (
-    extract_candidate_file_paths,
-    extract_candidate_function_names,
+from app.api import (
+    routes_demo,
+    routes_issues,
+    routes_poll,
+    routes_remediation,
+    routes_repos,
+    routes_status,
+    routes_subscribers,
 )
+from app.core.config import settings
+from app.db.session import SessionLocal
+from app.schemas.agent import PipelineResult, VerificationResult
+from app.services.agent_engine import run_sre_pipeline, to_pipeline_result
+from app.services.notification_service import seed_admin_subscriber
+from app.services.poller_service import poll_loop
+from app.services.repo_service import seed_sandbox_repos
+from app.services.sandbox_runner import run_preflight_verification
 
 logger = logging.getLogger("sre_pipeline")
 logging.basicConfig(level=logging.INFO)
 
-# --- Background polling worker ---
-# NOTE: this whole module is a holdover from the single-repo MVP and is
-# superseded by app/services/{repo,remediation,poller}_service.py once the
-# API routers land — it's kept minimally working in the meantime by pointing
-# every call at the first configured sandbox repo (falls back to the
-# deprecated GITHUB_REPO alias via settings.sandbox_repo_list).
-DEFAULT_REPO = settings.sandbox_repo_list[0] if settings.sandbox_repo_list else settings.GITHUB_REPO
-seen_issue_numbers: set[int] = set()
-POLL_INTERVAL_SECONDS = settings.POLL_INTERVAL_SECONDS
-CRITICAL_RISK_THRESHOLD = settings.CRITICAL_RISK_THRESHOLD
-
-
-async def poll_github_issues():
-    """Background loop: checks for new open GitHub issues every 60s."""
-    global seen_issue_numbers
-    is_first_run = True
-
-    while True:
-        try:
-            issues = await github_client.list_open_issues(DEFAULT_REPO)
-            current_numbers = {issue["number"] for issue in issues}
-
-            if not is_first_run:
-                new_numbers = current_numbers - seen_issue_numbers
-                for issue in issues:
-                    if issue["number"] in new_numbers:
-                        logger.info(
-                            f"[POLLER] 🆕 New issue detected: #{issue['number']} - {issue['title']}"
-                        )
-                        asyncio.create_task(auto_remediate_issue(issue))
-            else:
-                logger.info(
-                    f"[POLLER] 🔍 Initial poll baseline: {len(current_numbers)} open issue(s) recorded."
-                )
-                is_first_run = False
-
-            seen_issue_numbers = current_numbers
-
-        except Exception as e:
-            logger.error(f"[POLLER] ⚠️ Polling error: {e}")
-
-        await asyncio.sleep(POLL_INTERVAL_SECONDS)
-
-
-async def auto_remediate_issue(issue: dict):
-    """Triggered automatically when a new issue is detected. Runs the full loop."""
-    try:
-        logger.info(f"[POLLER] 🤖 Auto-remediation starting for issue #{issue['number']}")
-
-        error_log = issue.get("body", "") or issue.get("title", "")
-        source_code_context = ""  # no source context available from issue text alone
-
-        # run_sre_pipeline's graph already includes sandbox verification (and
-        # retries the fix once on a failed verification) — no need to run it
-        # a second time here like the old single-call version did.
-        pipeline_result = await run_in_threadpool(
-            run_sre_pipeline, error_log, source_code_context
-        )
-
-        diagnosis = pipeline_result["diagnosis"]
-        remediation = pipeline_result["remediation"]
-        test_generation = pipeline_result["test_generation"]
-        verification = pipeline_result["verification"]
-        is_critical = diagnosis.risk_score > CRITICAL_RISK_THRESHOLD
-
-        if not verification.passed:
-            logger.warning(
-                f"[POLLER] ❌ Auto-remediation for #{issue['number']} failed sandbox verification: {verification.stderr}"
-            )
-            if is_critical and settings.ADMIN_ALERT_EMAIL:
-                await run_in_threadpool(
-                    send_critical_alert,
-                    settings.ADMIN_ALERT_EMAIL,
-                    issue["number"],
-                    issue["title"],
-                    diagnosis.risk_score,
-                    diagnosis.root_cause_analysis,
-                    None,
-                )
-            return
-
-        branch_name = f"fix/issue-{issue['number']}-auto-remediation"
-        base_sha = await github_client.get_default_branch_sha(DEFAULT_REPO)
-        await github_client.create_branch(DEFAULT_REPO, branch_name, base_sha)
-
-        await github_client.create_or_update_file(
-            repo_full_name=DEFAULT_REPO,
-            file_path=remediation.target_file,
-            content=remediation.code_fix,
-            commit_message=f"fix: automated patch for issue #{issue['number']}",
-            branch_name=branch_name,
-        )
-
-        await github_client.create_or_update_file(
-            repo_full_name=DEFAULT_REPO,
-            file_path=f"tests/{test_generation.test_file_name}",
-            content=test_generation.test_code,
-            commit_message=f"test: add automated unit test for issue #{issue['number']}",
-            branch_name=branch_name,
-        )
-
-        pr_result = await github_client.create_pull_request(
-            repo_full_name=DEFAULT_REPO,
-            title=f"fix(sre): automated patch for Issue #{issue['number']}",
-            body=f"Auto-generated fix for issue #{issue['number']}.\n\nRisk Score: {diagnosis.risk_score}/10\n\n{diagnosis.root_cause_analysis}",
-            head_branch=branch_name,
-        )
-
-        logger.info(f"[POLLER] ✅ Auto-remediation PR opened: {pr_result.get('html_url')}")
-
-        await github_client.close_issue(
-            DEFAULT_REPO,
-            issue["number"],
-            comment=f"🤖 Automatically fixed by Sentinel SRE. See {pr_result.get('html_url')} for the patch and sandbox verification proof.",
-        )
-        logger.info(f"[POLLER] 🔒 Closed issue #{issue['number']}")
-
-        if is_critical and settings.ADMIN_ALERT_EMAIL:
-            await run_in_threadpool(
-                send_critical_alert,
-                settings.ADMIN_ALERT_EMAIL,
-                issue["number"],
-                issue["title"],
-                diagnosis.risk_score,
-                diagnosis.root_cause_analysis,
-                pr_result.get("html_url"),
-            )
-
-    except Exception as e:
-        logger.error(f"[POLLER] ⚠️ Auto-remediation failed for issue #{issue['number']}: {e}")
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(poll_github_issues())
+    with SessionLocal() as db:
+        await seed_sandbox_repos(db)
+        seed_admin_subscriber(db)
+
+    task = asyncio.create_task(poll_loop())
     logger.info(
-        f"🚀 Started background GitHub issue poller (every {POLL_INTERVAL_SECONDS}s)"
+        f"🚀 Started background sandbox-repo poller (every {settings.POLL_INTERVAL_SECONDS}s)"
     )
     yield
     task.cancel()
-    logger.info("🛑 Stopped background GitHub issue poller")
+    logger.info("🛑 Stopped background poller")
 
 
 app = FastAPI(title="Autonomous AI SRE Core Engine", lifespan=lifespan)
 
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(routes_repos.router)
+app.include_router(routes_issues.router)
+app.include_router(routes_remediation.router)
+app.include_router(routes_demo.router)
+app.include_router(routes_poll.router)
+app.include_router(routes_subscribers.router)
+app.include_router(routes_status.router)
 
 
 class TriageRequest(BaseModel):
@@ -189,19 +76,20 @@ class VerificationRequest(BaseModel):
     generated_test_code: str
 
 
-class PRAutomationRequest(BaseModel):
-    issue_number: int
-    error_log: str
-    source_code_context: str
-
-
 @app.get("/")
 def read_root():
-    return {"status": "online", "service": "Autonomous AI SRE Core Engine"}
+    try:
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {e}"
+    return {"status": "online", "service": "Autonomous AI SRE Core Engine", "database": db_status}
 
 
 @app.post("/api/triage", response_model=PipelineResult)
 def triage_issue(request: TriageRequest):
+    """Ad hoc scratchpad diagnosis — unpersisted, doesn't touch a repo."""
     try:
         state = run_sre_pipeline(request.error_log, request.source_code_context)
         return to_pipeline_result(state)
@@ -209,19 +97,9 @@ def triage_issue(request: TriageRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/issues")
-async def get_issues():
-    try:
-        issues = await github_client.list_open_issues(DEFAULT_REPO)
-        return {"issues": issues}
-    except Exception as e:
-        raise HTTPException(
-            status_code=502, detail=f"Failed to fetch GitHub issues: {e}"
-        )
-
-
 @app.post("/api/verify", response_model=VerificationResult)
 def verify_patch(request: VerificationRequest):
+    """Ad hoc sandbox check of pasted code — unpersisted."""
     try:
         return run_preflight_verification(
             target_file_rel_path=request.target_file,
@@ -233,140 +111,16 @@ def verify_patch(request: VerificationRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/remediate-and-pr")
-async def remediate_and_open_pr(request: PRAutomationRequest):
-    """Full end-to-end automation loop: Triage -> Sandbox Verification -> GitHub PR."""
-    try:
-        # run_sre_pipeline's graph already runs sandbox verification (with a
-        # retry-the-fix-once cycle baked in), so no separate verify call here.
-        pipeline_result = await run_in_threadpool(
-            run_sre_pipeline, request.error_log, request.source_code_context
-        )
-        diagnosis = pipeline_result["diagnosis"]
-        remediation = pipeline_result["remediation"]
-        test_generation = pipeline_result["test_generation"]
-        verification = pipeline_result["verification"]
-
-        if not verification.passed:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Pre-flight sandbox checks failed: {verification.stderr}",
-            )
-
-        branch_name = f"fix/issue-{request.issue_number}-auto-remediation"
-        base_sha = await github_client.get_default_branch_sha(DEFAULT_REPO)
-
-        await github_client.create_branch(DEFAULT_REPO, branch_name, base_sha)
-        await github_client.create_or_update_file(
-            repo_full_name=DEFAULT_REPO,
-            file_path=remediation.target_file,
-            content=remediation.code_fix,
-            commit_message=f"fix: automated patch for issue #{request.issue_number}",
-            branch_name=branch_name,
-        )
-
-        await github_client.create_or_update_file(
-            repo_full_name=DEFAULT_REPO,
-            file_path=f"tests/{test_generation.test_file_name}",
-            content=test_generation.test_code,
-            commit_message=f"test: add automated unit test for issue #{request.issue_number}",
-            branch_name=branch_name,
-        )
-
-        pr_body = f"""## 🤖 Autonomous SRE Remediation Report
-
-                **Issue ID:** #{request.issue_number}
-                **Risk Score:** {diagnosis.risk_score}/10
-
-                #### 📌 Root Cause Analysis
-                {diagnosis.root_cause_analysis}
-
-                #### 🛠️ Fix Description
-                {remediation.patch_explanation}
-
-                #### 🧪 Pre-Flight Execution Log
-```text
-                {verification.stdout if verification.stdout else 'Pytest passed successfully in sandbox.'}
-```
-                """
-        pr_result = await github_client.create_pull_request(
-            repo_full_name=DEFAULT_REPO,
-            title=f"fix(sre): automated patch for Issue #{request.issue_number}",
-            body=pr_body,
-            head_branch=branch_name,
-        )
-
-        await github_client.close_issue(
-            DEFAULT_REPO,
-            request.issue_number,
-            comment=f"🤖 Automatically fixed. See {pr_result.get('html_url')} for the patch and sandbox verification proof.",
-        )
-        logger.info(f"[MANUAL] 🔒 Closed issue #{request.issue_number}")
-
-        if diagnosis.risk_score > CRITICAL_RISK_THRESHOLD and settings.ADMIN_ALERT_EMAIL:
-            await run_in_threadpool(
-                send_critical_alert,
-                settings.ADMIN_ALERT_EMAIL,
-                request.issue_number,
-                f"Issue #{request.issue_number}",
-                diagnosis.risk_score,
-                diagnosis.root_cause_analysis,
-                pr_result.get("html_url"),
-            )
-
-        return {
-            "status": "success",
-            "pr_url": pr_result.get("html_url"),
-            "pr_number": pr_result.get("number"),
-            "branch": branch_name,
-            "verification": verification,
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.post("/api/webhook/github")
 async def github_webhook(request: Request):
-    """Listens for automated event payloads directly from GitHub."""
+    """Placeholder: real detection is poller-driven (settings.POLL_INTERVAL_SECONDS),
+    not webhook-driven yet — signature-verified webhook ingestion is a V2 item."""
     payload = await request.json()
     action = payload.get("action")
 
     if action == "opened" and "issue" in payload:
         issue = payload["issue"]
-        print(f"🤖 Automatic SRE Triggered for Issue #{issue['number']}")
-        return {"status": "auto_triage_started", "issue_number": issue["number"]}
+        logger.info(f"Webhook: issue #{issue['number']} opened (not yet auto-triaged from webhooks)")
+        return {"status": "event_received", "issue_number": issue["number"]}
 
     return {"status": "event_ignored"}
-
-
-@app.get("/api/issues/{issue_number}/context")
-async def get_issue_context(issue_number: int):
-    """Best-effort auto-resolution of the source file relevant to a GitHub issue."""
-    issue = await github_client.get_issue(DEFAULT_REPO, issue_number)
-    body = issue.get("body", "") or ""
-
-    # Tier 1: issue body mentions an explicit file path
-    for path in extract_candidate_file_paths(body):
-        content = await github_client.get_file_content(DEFAULT_REPO, path)
-        if content:
-            return {
-                "source_code": content,
-                "resolved_path": path,
-                "method": "direct_path",
-            }
-
-    # Tier 2: issue body mentions a function name — search the repo for it
-    for func_name in extract_candidate_function_names(body):
-        results = await github_client.search_code(DEFAULT_REPO, func_name)
-        if results:
-            path = results[0]["path"]
-            content = await github_client.get_file_content(DEFAULT_REPO, path)
-            if content:
-                return {
-                    "source_code": content,
-                    "resolved_path": path,
-                    "method": "code_search",
-                }
-
-    return {"source_code": "", "resolved_path": None, "method": "not_found"}
