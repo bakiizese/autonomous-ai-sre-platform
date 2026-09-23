@@ -2,6 +2,11 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.core.config import settings
+from app.db.base import Base
 from app.schemas.agent import (
     DiagnosisOutput,
     PipelineResult,
@@ -121,3 +126,36 @@ def mock_genai_client():
         mock_response = MagicMock()
         mock_client.models.generate_content.return_value = mock_response
         yield mock_client
+
+
+# ============================================================================
+# 5. DATABASE FIXTURES
+# ============================================================================
+# Uses settings.DATABASE_URL directly (the docker-compose postgres for local
+# dev, a dedicated service container in CI). Each test runs inside its own
+# transaction that's rolled back afterward, so tests never see each other's
+# data and don't need to clean up manually.
+
+
+@pytest.fixture(scope="session")
+def db_engine():
+    engine = create_engine(settings.DATABASE_URL)
+    import app.db.models  # noqa: F401  (register models on Base.metadata)
+
+    Base.metadata.create_all(engine)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def db_session(db_engine):
+    connection = db_engine.connect()
+    transaction = connection.begin()
+    session = sessionmaker(bind=connection)()
+    try:
+        yield session
+    finally:
+        session.close()
+        if transaction.is_active:
+            transaction.rollback()
+        connection.close()
