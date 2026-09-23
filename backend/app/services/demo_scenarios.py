@@ -2,8 +2,8 @@
 
 These reference specific pre-planted buggy files that need to actually exist
 in whichever repo(s) end up in settings.SANDBOX_REPOS — this module only
-describes the scenarios, it doesn't create the files itself. See the sandbox
-demo repo setup work for the matching demo/*.py implementations.
+describes the scenarios, it doesn't create the files itself. The matching
+demo/*.py files live in github.com/bakiizese/sentinel-sre-playground.
 """
 
 import random
@@ -50,9 +50,10 @@ DEMO_SCENARIOS: list[DemoScenario] = [
         id="type-coercion",
         title="Type coercion bug in demo/type_coercion.py",
         body=(
-            "`apply_discount()` in `demo/type_coercion.py` treats the discount "
-            "percentage as a string and concatenates instead of computing a "
-            "percentage — `apply_discount(100, '10')` returns `'10010'` instead of `90`."
+            "`apply_discount()` in `demo/type_coercion.py` raises "
+            "`TypeError: unsupported operand type(s) for /: 'str' and 'int'` when the "
+            "discount percentage arrives as a string, as it does from the checkout form. "
+            "`apply_discount(100, '10')` should return `90.0`."
         ),
     ),
 ]
