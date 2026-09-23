@@ -6,7 +6,7 @@
 
 ## 🛠️ Tech Stack & Key Libraries
 
-* **Framework:** React 18 (TypeScript)
+* **Framework:** React 19 (TypeScript)
 * **Build Tool:** Vite
 * **Styling:** Tailwind CSS & Custom CSS Tokens (`src/styles/tokens.css`)
 * **Icons & UI:** Lucide React / Heroicons
@@ -32,12 +32,19 @@ frontend/
 │   │   └── vite.svg
 │   ├── components/         # Reusable UI components
 │   │   ├── layout/
-│   │   │   └── Layout.tsx  # Navigation header, sidebar & page framing
-│   │   └── PipelineRail.tsx # Visual execution pipeline tracker component
+│   │   │   └── Layout.tsx  # Navigation header & page framing
+│   │   ├── PipelineRail.tsx       # Visual execution pipeline tracker
+│   │   ├── RateLimitBadge.tsx     # Live Gemini/GitHub rate-limit status (polls the backend)
+│   │   ├── ApprovalModal.tsx      # Human-in-the-loop review of a proposed fix
+│   │   ├── RunResultPanel.tsx     # Diagnosis, diff, test, and agent-graph trace for a run
+│   │   ├── EmailSubscribeForm.tsx # Critical-risk email alert signup
+│   │   └── VideoPlaceholder.tsx   # Walkthrough video embed / "coming soon" card
+│   ├── lib/
+│   │   └── runStatus.ts    # Run status display, risk colors, pipeline-rail mapping
 │   ├── pages/              # Primary view screens
-│   │   ├── Home.tsx        # Platform landing & feature overview
-│   │   ├── Dashboard.tsx   # Live agent control room, issue trigger & status logs
-│   │   └── About.tsx       # System architecture & team details
+│   │   ├── Home.tsx        # Landing page: overview, walkthrough video, free-tier notice, V2 teaser
+│   │   ├── Dashboard.tsx   # Repo selector, issue list, approval queue, sandbox demo, scratchpad
+│   │   └── About.tsx       # System architecture & stack
 │   ├── services/
 │   │   └── api.ts          # Axios backend API client & endpoint definitions
 │   ├── styles/
@@ -68,10 +75,15 @@ npm install
 
 ### 3. Environment Configuration
 
-Create a `.env` file in the `frontend/` directory (if targeting a custom API URL):
+Create a `.env` file in the `frontend/` directory (both variables are optional):
 
 ```env
+# Backend base URL (defaults to http://localhost:8000)
 VITE_API_BASE_URL=http://localhost:8000
+
+# Walkthrough video shown on the landing page — a YouTube/Loom/Vimeo embed URL
+# or a direct video file URL. Leave unset to show the "coming soon" card.
+VITE_WALKTHROUGH_VIDEO_URL=
 ```
 
 ### 4. Running the Development Server
@@ -88,6 +100,11 @@ Open `http://localhost:5173` in your browser.
 
 ## ⚙️ Key UI Features
 
-* **Real-time Pipeline Rail:** Visual step-by-step indicator (`PipelineRail.tsx`) tracking issue ingestion, code resolution, Gemini diagnosis, sandbox verification, and PR creation.
-* **Interactive Remediation Trigger:** Form inputs and dropdowns to dispatch GitHub issue remediation requests directly to the agent.
-* **Telemetry & Console Logs:** Live output feed showing sandbox test results and generated code diffs.
+* **Multi-repo dashboard:** Pick a writable sandbox repo (full loop) or connect any public repo for read-only inspection. Existing open issues are ingested as a baseline and are only diagnosed on demand.
+* **Human-in-the-loop approval:** Sandbox-repo fixes stop at an "awaiting approval" queue; the review modal shows the diff, generated test, and sandbox proof, and nothing is written to GitHub until you approve.
+* **Inject a bug:** One click opens a real canned bug report on the sandbox repo and runs the whole loop on it.
+* **Check now:** Ask the backend poller to check for new issues immediately instead of waiting for its 30s interval.
+* **Rate-limit visibility:** Header badges show live Gemini and GitHub availability (the demo runs on free-tier keys).
+* **Email alerts:** Enter an email to be notified right away when a diagnosis on the repo scores above 8/10.
+* **Agent graph trace:** Each run shows which graph nodes executed, retries included, and how long each took.
+* **Scratchpad:** Paste an error and source directly to run the agent graph without touching any repository.

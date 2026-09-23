@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { ShieldHalf } from 'lucide-react';
+import RateLimitBadges from '../RateLimitBadge';
 
 const navItems: { to: string; label: string; end?: boolean }[] = [
   { to: '/', label: 'Home', end: true },
@@ -48,16 +49,7 @@ export default function Layout() {
           </nav>
 
           <div className="flex items-center gap-3">
-            <div
-              className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 rounded-md font-mono-ui text-[10px] tracking-wide"
-              style={{ background: 'var(--panel)', border: '1px solid var(--line)' }}
-            >
-              <span
-                className="w-1.5 h-1.5 rounded-full animate-pulse-dot"
-                style={{ background: 'var(--status-green)' }}
-              />
-              <span style={{ color: 'var(--mute)' }}>POLLER ACTIVE · 60S</span>
-            </div>
+            <RateLimitBadges />
             <NavLink
               to="/dashboard"
               className="px-4 py-2 rounded-md text-xs font-semibold transition-opacity hover:opacity-90"
@@ -79,7 +71,7 @@ export default function Layout() {
             © {new Date().getFullYear()} Sentinel SRE · Autonomous remediation engine
           </span>
           <span className="font-mono-ui text-[11px]" style={{ color: 'var(--mute)' }}>
-            gemini-2.5-flash · sandboxed pytest · github rest api
+            gemini · langgraph · sandboxed pytest · github rest api
           </span>
         </div>
       </footer>

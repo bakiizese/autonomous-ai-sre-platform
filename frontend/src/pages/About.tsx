@@ -1,15 +1,18 @@
 const STACK = [
-  { layer: 'Triage engine', detail: 'google-genai SDK · gemini-2.5-flash · structured output via Pydantic' },
+  { layer: 'Agent graph', detail: 'LangGraph state graph · diagnose → fix → test → verify · per-node retry with backoff' },
+  { layer: 'LLM', detail: 'google-genai SDK · Gemini · narrow structured-output schema per node via Pydantic' },
   { layer: 'Sandbox', detail: 'tempfile.TemporaryDirectory · subprocess pytest · timeout-enforced' },
-  { layer: 'GitHub integration', detail: 'httpx · REST API · branch, commit, and pull request automation' },
-  { layer: 'API', detail: 'FastAPI · Python 3.12 · single-pass prompt to minimize latency and rate-limit exposure' },
+  { layer: 'GitHub integration', detail: 'httpx · REST API · rate-limit tracking · branch, commit, and pull request automation' },
+  { layer: 'API', detail: 'FastAPI · Python 3.12 · human-approval gate before any GitHub write' },
+  { layer: 'Persistence', detail: 'PostgreSQL · SQLAlchemy · Alembic migrations · run history and audit trail' },
   { layer: 'Frontend', detail: 'React 19 · TypeScript · Vite · Tailwind CSS v4' },
 ];
 
 const PIPELINE = [
-  { name: 'Issue', detail: 'GitHub issue or pasted log' },
-  { name: 'Triage engine', detail: 'diagnosis + patch + tests' },
+  { name: 'Issue', detail: 'polled every 30s or on demand' },
+  { name: 'Agent graph', detail: 'diagnose · fix · test · verify' },
   { name: 'Sandbox', detail: 'isolated pytest run' },
+  { name: 'Human review', detail: 'approve or reject the fix' },
   { name: 'GitHub', detail: 'branch · commit · PR' },
 ];
 
@@ -90,8 +93,10 @@ export default function About() {
         style={{ background: 'var(--signal-wash)', border: '1px solid var(--signal-dim)' }}
       >
         <p className="text-sm leading-relaxed" style={{ color: 'var(--ink)' }}>
-          <span className="font-semibold">Nothing merges unreviewed.</span> Sentinel opens a
-          pull request; it does not have permission to approve or merge one. The sandbox log,
+          <span className="font-semibold">Nothing merges unreviewed.</span> A fix waits for a
+          human's approval before Sentinel writes anything to GitHub, and even then it only opens
+          a pull request — it does not have permission to approve or merge one. Repos you connect
+          for inspection are read-only by construction: the pipeline stops after diagnosis. The sandbox log,
           risk score, and root-cause analysis travel with the PR so the reviewing engineer has
           the same context the system used to write the fix.
         </p>
