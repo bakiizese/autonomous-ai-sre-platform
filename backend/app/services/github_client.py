@@ -61,14 +61,21 @@ class GitHubClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_repo(self, repo_full_name: str) -> Dict[str, Any]:
+        """Fetch repo metadata (default_branch, private, etc.) — used both by
+        get_default_branch_sha and by repo_service when connecting a repo."""
+        response = await self._request("GET", self._base_url(repo_full_name))
+        response.raise_for_status()
+        return response.json()
+
     async def get_default_branch_sha(self, repo_full_name: str) -> str:
         """Get the latest commit SHA from the repo's default branch."""
-        base_url = self._base_url(repo_full_name)
-        repo_res = await self._request("GET", base_url)
-        repo_res.raise_for_status()
-        default_branch = repo_res.json().get("default_branch", "main")
+        repo_data = await self.get_repo(repo_full_name)
+        default_branch = repo_data.get("default_branch", "main")
 
-        ref_res = await self._request("GET", f"{base_url}/git/ref/heads/{default_branch}")
+        ref_res = await self._request(
+            "GET", f"{self._base_url(repo_full_name)}/git/ref/heads/{default_branch}"
+        )
         ref_res.raise_for_status()
         return ref_res.json()["object"]["sha"]
 

@@ -91,9 +91,10 @@ async def auto_remediate_issue(issue: dict):
             logger.warning(
                 f"[POLLER] ❌ Auto-remediation for #{issue['number']} failed sandbox verification: {verification.stderr}"
             )
-            if is_critical:
+            if is_critical and settings.ADMIN_ALERT_EMAIL:
                 await run_in_threadpool(
                     send_critical_alert,
+                    settings.ADMIN_ALERT_EMAIL,
                     issue["number"],
                     issue["title"],
                     diagnosis.risk_score,
@@ -138,9 +139,10 @@ async def auto_remediate_issue(issue: dict):
         )
         logger.info(f"[POLLER] 🔒 Closed issue #{issue['number']}")
 
-        if is_critical:
+        if is_critical and settings.ADMIN_ALERT_EMAIL:
             await run_in_threadpool(
                 send_critical_alert,
+                settings.ADMIN_ALERT_EMAIL,
                 issue["number"],
                 issue["title"],
                 diagnosis.risk_score,
@@ -301,9 +303,10 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
         )
         logger.info(f"[MANUAL] 🔒 Closed issue #{request.issue_number}")
 
-        if diagnosis.risk_score > CRITICAL_RISK_THRESHOLD:
+        if diagnosis.risk_score > CRITICAL_RISK_THRESHOLD and settings.ADMIN_ALERT_EMAIL:
             await run_in_threadpool(
                 send_critical_alert,
+                settings.ADMIN_ALERT_EMAIL,
                 request.issue_number,
                 f"Issue #{request.issue_number}",
                 diagnosis.risk_score,
