@@ -58,6 +58,21 @@ async def test_get_default_branch_sha_success(client):
 
 
 @pytest.mark.asyncio
+@respx.mock
+async def test_get_repo_returns_metadata(client):
+    """Test fetching repo metadata (used by repo_service to check private/default_branch)."""
+    url = f"https://api.github.com/repos/{REPO}"
+    respx.get(url).respond(
+        status_code=200, json={"default_branch": "main", "private": False}
+    )
+
+    repo_data = await client.get_repo(REPO)
+
+    assert repo_data["default_branch"] == "main"
+    assert repo_data["private"] is False
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status_code", [201, 422])
 @respx.mock
 async def test_create_branch(client, status_code):

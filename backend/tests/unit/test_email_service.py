@@ -15,7 +15,6 @@ def mock_smtp_settings():
         mock_settings.SMTP_USER = "alerts@example.com"
         mock_settings.SMTP_PASSWORD = "secret-password"
         mock_settings.ALERT_EMAIL_FROM = "sentinel@example.com"
-        mock_settings.ALERT_EMAIL_TO = "sre-team@example.com"
         yield mock_settings
 
 
@@ -23,6 +22,7 @@ def mock_smtp_settings():
 def sample_alert_data():
     """Provides standard inputs for the email alert function."""
     return {
+        "to_email": "sre-team@example.com",
         "issue_number": 101,
         "issue_title": "Database Connection Leak",
         "risk_score": 9,
@@ -82,9 +82,24 @@ def test_send_critical_alert_without_pr_url(
     send_critical_alert(**sample_alert_data)
 
     raw_msg = mock_server.sendmail.call_args[0][2]
-    assert (
-        "No pull request was opened (sandbox verification may have failed)." in raw_msg
-    )
+    assert "No pull request was opened yet" in raw_msg
+
+
+@patch("smtplib.SMTP")
+def test_send_critical_alert_to_different_recipients(
+    mock_smtp_cls, mock_smtp_settings, sample_alert_data
+):
+    """Each subscriber's email is just the recipient — always sent from the
+    platform's own configured SMTP address, never per-subscriber mail config."""
+    mock_server = MagicMock()
+    mock_smtp_cls.return_value.__enter__.return_value = mock_server
+
+    sample_alert_data["to_email"] = "someone-who-connected-a-repo@example.com"
+    send_critical_alert(**sample_alert_data)
+
+    from_addr, to_addrs, _ = mock_server.sendmail.call_args[0]
+    assert from_addr == "sentinel@example.com"
+    assert to_addrs == ["someone-who-connected-a-repo@example.com"]
 
 
 @pytest.mark.parametrize(
@@ -92,6 +107,7 @@ def test_send_critical_alert_without_pr_url(
     [
         (None, "sre@example.com"),
         ("smtp.example.com", None),
+        ("smtp.example.com", ""),
         (None, None),
     ],
 )
@@ -100,15 +116,16 @@ def test_send_critical_alert_without_pr_url(
 def test_send_critical_alert_skipped_when_unconfigured(
     mock_logger, mock_smtp_cls, mock_smtp_settings, sample_alert_data, host, to_email
 ):
-    """Test that email sending is safely skipped when SMTP_HOST or ALERT_EMAIL_TO is missing."""
+    """Test that email sending is safely skipped when SMTP_HOST isn't
+    configured or no recipient email was given."""
     mock_smtp_settings.SMTP_HOST = host
-    mock_smtp_settings.ALERT_EMAIL_TO = to_email
+    sample_alert_data["to_email"] = to_email
 
     send_critical_alert(**sample_alert_data)
 
     mock_smtp_cls.assert_not_called()
     mock_logger.warning.assert_called_once_with(
-        "Email alert skipped: SMTP_HOST or ALERT_EMAIL_TO not configured."
+        "Email alert skipped: SMTP_HOST not configured or no recipient given."
     )
 
 
