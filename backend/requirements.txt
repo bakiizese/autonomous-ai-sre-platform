@@ -8,3 +8,4 @@ httpx
 sqlalchemy
 alembic
 psycopg[binary]
+langgraph

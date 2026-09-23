@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.services.agent_engine import run_sre_pipeline
+from app.services.agent_engine import run_sre_pipeline, to_pipeline_result
 from app.services.sandbox_runner import run_preflight_verification
 from app.schemas.agent import PipelineResult, VerificationResult
 from app.services.github_client import github_client
@@ -74,19 +74,18 @@ async def auto_remediate_issue(issue: dict):
         error_log = issue.get("body", "") or issue.get("title", "")
         source_code_context = ""  # no source context available from issue text alone
 
+        # run_sre_pipeline's graph already includes sandbox verification (and
+        # retries the fix once on a failed verification) — no need to run it
+        # a second time here like the old single-call version did.
         pipeline_result = await run_in_threadpool(
             run_sre_pipeline, error_log, source_code_context
         )
 
-        is_critical = pipeline_result.diagnosis.risk_score > CRITICAL_RISK_THRESHOLD
-
-        verification = await run_in_threadpool(
-            run_preflight_verification,
-            target_file_rel_path=pipeline_result.remediation.target_file,
-            remediated_code=pipeline_result.remediation.code_fix,
-            test_file_name=pipeline_result.test_generation.test_file_name,
-            generated_test_code=pipeline_result.test_generation.test_code,
-        )
+        diagnosis = pipeline_result["diagnosis"]
+        remediation = pipeline_result["remediation"]
+        test_generation = pipeline_result["test_generation"]
+        verification = pipeline_result["verification"]
+        is_critical = diagnosis.risk_score > CRITICAL_RISK_THRESHOLD
 
         if not verification.passed:
             logger.warning(
@@ -97,8 +96,8 @@ async def auto_remediate_issue(issue: dict):
                     send_critical_alert,
                     issue["number"],
                     issue["title"],
-                    pipeline_result.diagnosis.risk_score,
-                    pipeline_result.diagnosis.root_cause_analysis,
+                    diagnosis.risk_score,
+                    diagnosis.root_cause_analysis,
                     None,
                 )
             return
@@ -109,16 +108,16 @@ async def auto_remediate_issue(issue: dict):
 
         await github_client.create_or_update_file(
             repo_full_name=DEFAULT_REPO,
-            file_path=pipeline_result.remediation.target_file,
-            content=pipeline_result.remediation.code_fix,
+            file_path=remediation.target_file,
+            content=remediation.code_fix,
             commit_message=f"fix: automated patch for issue #{issue['number']}",
             branch_name=branch_name,
         )
 
         await github_client.create_or_update_file(
             repo_full_name=DEFAULT_REPO,
-            file_path=f"tests/{pipeline_result.test_generation.test_file_name}",
-            content=pipeline_result.test_generation.test_code,
+            file_path=f"tests/{test_generation.test_file_name}",
+            content=test_generation.test_code,
             commit_message=f"test: add automated unit test for issue #{issue['number']}",
             branch_name=branch_name,
         )
@@ -126,7 +125,7 @@ async def auto_remediate_issue(issue: dict):
         pr_result = await github_client.create_pull_request(
             repo_full_name=DEFAULT_REPO,
             title=f"fix(sre): automated patch for Issue #{issue['number']}",
-            body=f"Auto-generated fix for issue #{issue['number']}.\n\nRisk Score: {pipeline_result.diagnosis.risk_score}/10\n\n{pipeline_result.diagnosis.root_cause_analysis}",
+            body=f"Auto-generated fix for issue #{issue['number']}.\n\nRisk Score: {diagnosis.risk_score}/10\n\n{diagnosis.root_cause_analysis}",
             head_branch=branch_name,
         )
 
@@ -144,8 +143,8 @@ async def auto_remediate_issue(issue: dict):
                 send_critical_alert,
                 issue["number"],
                 issue["title"],
-                pipeline_result.diagnosis.risk_score,
-                pipeline_result.diagnosis.root_cause_analysis,
+                diagnosis.risk_score,
+                diagnosis.root_cause_analysis,
                 pr_result.get("html_url"),
             )
 
@@ -202,7 +201,8 @@ def read_root():
 @app.post("/api/triage", response_model=PipelineResult)
 def triage_issue(request: TriageRequest):
     try:
-        return run_sre_pipeline(request.error_log, request.source_code_context)
+        state = run_sre_pipeline(request.error_log, request.source_code_context)
+        return to_pipeline_result(state)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -235,16 +235,15 @@ def verify_patch(request: VerificationRequest):
 async def remediate_and_open_pr(request: PRAutomationRequest):
     """Full end-to-end automation loop: Triage -> Sandbox Verification -> GitHub PR."""
     try:
+        # run_sre_pipeline's graph already runs sandbox verification (with a
+        # retry-the-fix-once cycle baked in), so no separate verify call here.
         pipeline_result = await run_in_threadpool(
             run_sre_pipeline, request.error_log, request.source_code_context
         )
-        verification = await run_in_threadpool(
-            run_preflight_verification,
-            target_file_rel_path=pipeline_result.remediation.target_file,
-            remediated_code=pipeline_result.remediation.code_fix,
-            test_file_name=pipeline_result.test_generation.test_file_name,
-            generated_test_code=pipeline_result.test_generation.test_code,
-        )
+        diagnosis = pipeline_result["diagnosis"]
+        remediation = pipeline_result["remediation"]
+        test_generation = pipeline_result["test_generation"]
+        verification = pipeline_result["verification"]
 
         if not verification.passed:
             raise HTTPException(
@@ -258,16 +257,16 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
         await github_client.create_branch(DEFAULT_REPO, branch_name, base_sha)
         await github_client.create_or_update_file(
             repo_full_name=DEFAULT_REPO,
-            file_path=pipeline_result.remediation.target_file,
-            content=pipeline_result.remediation.code_fix,
+            file_path=remediation.target_file,
+            content=remediation.code_fix,
             commit_message=f"fix: automated patch for issue #{request.issue_number}",
             branch_name=branch_name,
         )
 
         await github_client.create_or_update_file(
             repo_full_name=DEFAULT_REPO,
-            file_path=f"tests/{pipeline_result.test_generation.test_file_name}",
-            content=pipeline_result.test_generation.test_code,
+            file_path=f"tests/{test_generation.test_file_name}",
+            content=test_generation.test_code,
             commit_message=f"test: add automated unit test for issue #{request.issue_number}",
             branch_name=branch_name,
         )
@@ -275,13 +274,13 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
         pr_body = f"""## 🤖 Autonomous SRE Remediation Report
 
                 **Issue ID:** #{request.issue_number}
-                **Risk Score:** {pipeline_result.diagnosis.risk_score}/10
+                **Risk Score:** {diagnosis.risk_score}/10
 
                 #### 📌 Root Cause Analysis
-                {pipeline_result.diagnosis.root_cause_analysis}
+                {diagnosis.root_cause_analysis}
 
                 #### 🛠️ Fix Description
-                {pipeline_result.remediation.patch_explanation}
+                {remediation.patch_explanation}
 
                 #### 🧪 Pre-Flight Execution Log
 ```text
@@ -302,13 +301,13 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
         )
         logger.info(f"[MANUAL] 🔒 Closed issue #{request.issue_number}")
 
-        if pipeline_result.diagnosis.risk_score > CRITICAL_RISK_THRESHOLD:
+        if diagnosis.risk_score > CRITICAL_RISK_THRESHOLD:
             await run_in_threadpool(
                 send_critical_alert,
                 request.issue_number,
                 f"Issue #{request.issue_number}",
-                pipeline_result.diagnosis.risk_score,
-                pipeline_result.diagnosis.root_cause_analysis,
+                diagnosis.risk_score,
+                diagnosis.root_cause_analysis,
                 pr_result.get("html_url"),
             )
 
