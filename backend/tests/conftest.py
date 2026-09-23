@@ -10,14 +10,6 @@ from app.schemas.agent import (
     VerificationResult,
 )
 
-DiagnosisOutput(
-    summary="Null pointer exception in data processing pipeline.",
-    root_cause_analysis="Null Pointer Exception in process_data when data argument is None.",
-    affected_files=["app/services/data.py"],
-    root_cause="Null Pointer Exception in process_data",  # include if still present on schema
-    risk_score=7,
-)
-
 # ============================================================================
 # 1. GLOBAL ENVIRONMENT & SETTINGS FIXTURES
 # ============================================================================
@@ -71,7 +63,7 @@ def sample_issue_body() -> str:
     """Markdown GitHub issue body for issue extractor tests."""
     return """
     ### Bug Report: Unhandled TypeError in `app/services/data.py`
-    
+
     When running `process_data()`, an unhandled NoneType exception occurs.
     Please review `app/services/data.py` and call `validate_input(data)` first.
     """
@@ -87,15 +79,21 @@ def mock_pipeline_result() -> PipelineResult:
     """Provides a valid PipelineResult instance."""
     return PipelineResult(
         diagnosis=DiagnosisOutput(
-            root_cause="TypeError due to unvalidated None payload in process_data()",
+            summary="Unhandled TypeError when iterating a None payload.",
+            root_cause_analysis="TypeError due to unvalidated None payload in process_data()",
+            affected_files=["app/services/data.py"],
             risk_score=8,
         ),
         remediation=RemediationOutput(
+            patch_explanation="Guard against a None/empty payload before iterating.",
+            target_file="app/services/data.py",
             code_fix="def process_data(data):\n    if not data:\n        return\n    for item in data:\n        print(item)",
-            git_diff="--- a/app/services/data.py\n+++ b/app/services/data.py\n@@ -1,2 +1,4 @@",
+            git_diff_patch="--- a/app/services/data.py\n+++ b/app/services/data.py\n@@ -1,2 +1,4 @@",
         ),
         test_generation=TestGenerationOutput(
-            pytest_code="def test_process_data_none():\n    from app.services.data import process_data\n    process_data(None)"
+            test_file_name="test_process_data.py",
+            test_code="def test_process_data_none():\n    from app.services.data import process_data\n    process_data(None)",
+            test_description="Verifies process_data no longer raises on a None payload.",
         ),
     )
 
@@ -119,7 +117,7 @@ def mock_verification_result_passed() -> VerificationResult:
 @pytest.fixture
 def mock_genai_client():
     """Mocks the google.genai Client response."""
-    with patch("app.sre_pipeline.client") as mock_client:
+    with patch("app.services.agent_engine.client") as mock_client:
         mock_response = MagicMock()
         mock_client.models.generate_content.return_value = mock_response
         yield mock_client
