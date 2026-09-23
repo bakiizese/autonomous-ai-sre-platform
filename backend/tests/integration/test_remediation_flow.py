@@ -24,6 +24,17 @@ TEST_GEN = TestGenerationOutput(test_file_name="test_a.py", test_code="code", te
 PASSED_VERIFICATION = VerificationResult(passed=True, target_test_passed=True, stdout="ok", stderr="")
 
 
+@pytest.fixture(autouse=True)
+def no_real_source_lookup():
+    """start_remediation_run resolves source context from GitHub; keep tests offline."""
+    with patch.object(
+        remediation_service,
+        "resolve_source_context",
+        AsyncMock(return_value={"source_code": "", "resolved_path": None, "method": "not_found"}),
+    ):
+        yield
+
+
 @pytest.fixture
 def client(db_session):
     def override_get_db():

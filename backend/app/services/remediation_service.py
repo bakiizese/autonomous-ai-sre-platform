@@ -8,6 +8,7 @@ from app.db.models import Issue, RemediationRun, Repo, RepoType, RunStatus, RunT
 from app.services.agent_engine import run_sre_pipeline
 from app.services.github_client import github_client
 from app.services.notification_service import notify_subscribers
+from app.services.source_context_service import resolve_source_context
 
 logger = logging.getLogger("sre_pipeline")
 
@@ -38,9 +39,19 @@ async def start_remediation_run(
     error_log = issue.body or issue.title
     stop_after_diagnosis = repo.repo_type != RepoType.sandbox
 
+    # Without the actual source, the model would be rewriting the target file
+    # blind from the issue text. Failing to find it isn't fatal, just worse.
+    source_context = ""
+    try:
+        resolved = await resolve_source_context(repo.full_name, issue.body or "")
+        if resolved["source_code"]:
+            source_context = f"FILE PATH: {resolved['resolved_path']}\n\n{resolved['source_code']}"
+    except Exception as e:
+        logger.warning(f"[REMEDIATION] Could not resolve source context for issue #{issue.issue_number}: {e}")
+
     try:
         state = await run_in_threadpool(
-            run_sre_pipeline, error_log, "", stop_after_diagnosis
+            run_sre_pipeline, error_log, source_context, stop_after_diagnosis
         )
     except Exception as e:
         logger.error(f"[REMEDIATION] Run {run.id} for issue #{issue.issue_number} failed: {e}")
