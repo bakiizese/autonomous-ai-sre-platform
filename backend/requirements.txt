@@ -5,10 +5,3 @@ pydantic
 pydantic-settings
 python-dotenv
 httpx
-
-# --- testing ---
-pytest
-pytest-asyncio      
-pytest-mock         
-respx        
-pytest-cov
