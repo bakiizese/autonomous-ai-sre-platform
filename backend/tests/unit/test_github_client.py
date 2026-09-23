@@ -6,13 +6,14 @@ import respx
 
 from app.services.github_client import GitHubClient, github_client
 
+REPO = "owner/test-repo"
+
 
 @pytest.fixture
 def client():
-    """Instantiate a GitHubClient with standard headers for testing."""
+    """Instantiate a GitHubClient with a fake token for testing."""
     with patch("app.services.github_client.settings") as mock_settings:
         mock_settings.GITHUB_TOKEN = "fake-token"
-        mock_settings.GITHUB_REPO = "owner/test-repo"
         yield GitHubClient()
 
 
@@ -21,7 +22,7 @@ def client():
 async def test_get_issue_success(client):
     """Test successfully fetching an issue from GitHub."""
     issue_number = 42
-    url = f"https://api.github.com/repos/owner/test-repo/issues/{issue_number}"
+    url = f"https://api.github.com/repos/{REPO}/issues/{issue_number}"
 
     respx.get(url).respond(
         status_code=200,
@@ -32,7 +33,7 @@ async def test_get_issue_success(client):
         },
     )
 
-    issue = await client.get_issue(issue_number)
+    issue = await client.get_issue(REPO, issue_number)
 
     assert issue["number"] == 42
     assert issue["title"] == "Bug report"
@@ -43,15 +44,15 @@ async def test_get_issue_success(client):
 @respx.mock
 async def test_get_default_branch_sha_success(client):
     """Test getting default branch name and fetching its latest commit SHA."""
-    repo_url = "https://api.github.com/repos/owner/test-repo"
-    ref_url = "https://api.github.com/repos/owner/test-repo/git/ref/heads/main"
+    repo_url = f"https://api.github.com/repos/{REPO}"
+    ref_url = f"https://api.github.com/repos/{REPO}/git/ref/heads/main"
 
     respx.get(repo_url).respond(status_code=200, json={"default_branch": "main"})
     respx.get(ref_url).respond(
         status_code=200, json={"object": {"sha": "abc123def456"}}
     )
 
-    sha = await client.get_default_branch_sha()
+    sha = await client.get_default_branch_sha(REPO)
 
     assert sha == "abc123def456"
 
@@ -61,11 +62,11 @@ async def test_get_default_branch_sha_success(client):
 @respx.mock
 async def test_create_branch(client, status_code):
     """Test creating a new git branch (both new branch and already existing branch)."""
-    url = "https://api.github.com/repos/owner/test-repo/git/refs"
+    url = f"https://api.github.com/repos/{REPO}/git/refs"
 
     route = respx.post(url).respond(status_code=status_code, json={})
 
-    result = await client.create_branch("fix/bug-1", "base-sha-123")
+    result = await client.create_branch(REPO, "fix/bug-1", "base-sha-123")
 
     assert result is True
     assert route.called
@@ -80,7 +81,7 @@ async def test_create_or_update_file_new_file(client):
     """Test creating a brand new file (no existing SHA)."""
     file_path = "src/main.py"
     branch_name = "fix/bug-1"
-    url = f"https://api.github.com/repos/owner/test-repo/contents/{file_path}"
+    url = f"https://api.github.com/repos/{REPO}/contents/{file_path}"
 
     # Return 404 for existing file check
     respx.get(f"{url}?ref={branch_name}").respond(status_code=404)
@@ -91,7 +92,7 @@ async def test_create_or_update_file_new_file(client):
     expected_encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
 
     res = await client.create_or_update_file(
-        file_path, content, "add main.py", branch_name
+        REPO, file_path, content, "add main.py", branch_name
     )
 
     assert res["commit"]["sha"] == "new-file-sha"
@@ -107,7 +108,7 @@ async def test_create_or_update_file_existing_file(client):
     """Test updating an existing file (provides old SHA in payload)."""
     file_path = "src/main.py"
     branch_name = "fix/bug-1"
-    url = f"https://api.github.com/repos/owner/test-repo/contents/{file_path}"
+    url = f"https://api.github.com/repos/{REPO}/contents/{file_path}"
 
     # Existing file check returns old SHA
     respx.get(f"{url}?ref={branch_name}").respond(
@@ -117,7 +118,7 @@ async def test_create_or_update_file_existing_file(client):
     respx.put(url).respond(status_code=200, json={"commit": {"sha": "updated-sha"}})
 
     res = await client.create_or_update_file(
-        file_path, "updated content", "update file", branch_name
+        REPO, file_path, "updated content", "update file", branch_name
     )
 
     assert res["commit"]["sha"] == "updated-sha"
@@ -129,13 +130,14 @@ async def test_create_or_update_file_existing_file(client):
 @respx.mock
 async def test_create_pull_request(client):
     """Test creating a Pull Request."""
-    url = "https://api.github.com/repos/owner/test-repo/pulls"
+    url = f"https://api.github.com/repos/{REPO}/pulls"
 
     respx.post(url).respond(
         status_code=201, json={"number": 10, "html_url": "https://github.com/pr/10"}
     )
 
     res = await client.create_pull_request(
+        REPO,
         title="Fix bug",
         body="PR details",
         head_branch="fix/bug-1",
@@ -148,9 +150,26 @@ async def test_create_pull_request(client):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_create_issue(client):
+    """Test opening a new issue (used by the sandbox 'inject a bug' demo flow)."""
+    url = f"https://api.github.com/repos/{REPO}/issues"
+
+    respx.post(url).respond(
+        status_code=201, json={"number": 99, "html_url": "https://github.com/issue/99"}
+    )
+
+    res = await client.create_issue(REPO, "Demo bug: off-by-one", "Injected for the demo.")
+
+    assert res["number"] == 99
+    request_json = respx.calls.last.request.content.decode("utf-8")
+    assert '"title":"Demo bug: off-by-one"' in request_json
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_list_open_issues_filters_pull_requests(client):
     """Test listing issues and verifying PR items are filtered out."""
-    url = "https://api.github.com/repos/owner/test-repo/issues?state=open"
+    url = f"https://api.github.com/repos/{REPO}/issues?state=open"
 
     raw_response = [
         {
@@ -172,7 +191,7 @@ async def test_list_open_issues_filters_pull_requests(client):
 
     respx.get(url).respond(status_code=200, json=raw_response)
 
-    issues = await client.list_open_issues()
+    issues = await client.list_open_issues(REPO)
 
     assert len(issues) == 1
     assert issues[0]["number"] == 1
@@ -183,8 +202,50 @@ async def test_list_open_issues_filters_pull_requests(client):
 @respx.mock
 async def test_http_error_propagation(client):
     """Test HTTP 404/500 errors throw HTTPStatusError via raise_for_status()."""
-    url = "https://api.github.com/repos/owner/test-repo/issues/999"
+    url = f"https://api.github.com/repos/{REPO}/issues/999"
     respx.get(url).respond(status_code=404)
 
     with pytest.raises(httpx.HTTPStatusError):
-        await client.get_issue(999)
+        await client.get_issue(REPO, 999)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rate_limit_recorded_on_every_call(client):
+    """_request() records GitHub's rate-limit headers on every call, so the
+    status endpoint reflects reality even for a plain successful request."""
+    from app.services import rate_limit_service
+
+    url = f"https://api.github.com/repos/{REPO}/issues/1"
+    respx.get(url).respond(
+        status_code=200,
+        json={"number": 1, "title": "x", "body": ""},
+        headers={"X-RateLimit-Remaining": "37", "X-RateLimit-Reset": "9999999999"},
+    )
+
+    await client.get_issue(REPO, 1)
+
+    status = rate_limit_service.get_status()
+    assert status["github"]["remaining_calls"] == 37
+    assert status["github"]["is_limited"] is False
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_rate_limit_flagged_when_exhausted(client):
+    """A 403 with X-RateLimit-Remaining: 0 marks GitHub as limited."""
+    from app.services import rate_limit_service
+
+    url = f"https://api.github.com/repos/{REPO}/issues/2"
+    respx.get(url).respond(
+        status_code=403,
+        json={"message": "rate limit exceeded"},
+        headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "9999999999"},
+    )
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.get_issue(REPO, 2)
+
+    status = rate_limit_service.get_status()
+    assert status["github"]["is_limited"] is True
+    assert status["github"]["limited_until"] is not None

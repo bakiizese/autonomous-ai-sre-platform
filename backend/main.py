@@ -8,6 +8,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from app.core.config import settings
 from app.services.agent_engine import run_sre_pipeline
 from app.services.sandbox_runner import run_preflight_verification
 from app.schemas.agent import PipelineResult, VerificationResult
@@ -22,9 +23,15 @@ logger = logging.getLogger("sre_pipeline")
 logging.basicConfig(level=logging.INFO)
 
 # --- Background polling worker ---
+# NOTE: this whole module is a holdover from the single-repo MVP and is
+# superseded by app/services/{repo,remediation,poller}_service.py once the
+# API routers land — it's kept minimally working in the meantime by pointing
+# every call at the first configured sandbox repo (falls back to the
+# deprecated GITHUB_REPO alias via settings.sandbox_repo_list).
+DEFAULT_REPO = settings.sandbox_repo_list[0] if settings.sandbox_repo_list else settings.GITHUB_REPO
 seen_issue_numbers: set[int] = set()
-POLL_INTERVAL_SECONDS = 60
-CRITICAL_RISK_THRESHOLD = 7
+POLL_INTERVAL_SECONDS = settings.POLL_INTERVAL_SECONDS
+CRITICAL_RISK_THRESHOLD = settings.CRITICAL_RISK_THRESHOLD
 
 
 async def poll_github_issues():
@@ -34,7 +41,7 @@ async def poll_github_issues():
 
     while True:
         try:
-            issues = await github_client.list_open_issues()
+            issues = await github_client.list_open_issues(DEFAULT_REPO)
             current_numbers = {issue["number"] for issue in issues}
 
             if not is_first_run:
@@ -97,10 +104,11 @@ async def auto_remediate_issue(issue: dict):
             return
 
         branch_name = f"fix/issue-{issue['number']}-auto-remediation"
-        base_sha = await github_client.get_default_branch_sha()
-        await github_client.create_branch(branch_name, base_sha)
+        base_sha = await github_client.get_default_branch_sha(DEFAULT_REPO)
+        await github_client.create_branch(DEFAULT_REPO, branch_name, base_sha)
 
         await github_client.create_or_update_file(
+            repo_full_name=DEFAULT_REPO,
             file_path=pipeline_result.remediation.target_file,
             content=pipeline_result.remediation.code_fix,
             commit_message=f"fix: automated patch for issue #{issue['number']}",
@@ -108,6 +116,7 @@ async def auto_remediate_issue(issue: dict):
         )
 
         await github_client.create_or_update_file(
+            repo_full_name=DEFAULT_REPO,
             file_path=f"tests/{pipeline_result.test_generation.test_file_name}",
             content=pipeline_result.test_generation.test_code,
             commit_message=f"test: add automated unit test for issue #{issue['number']}",
@@ -115,6 +124,7 @@ async def auto_remediate_issue(issue: dict):
         )
 
         pr_result = await github_client.create_pull_request(
+            repo_full_name=DEFAULT_REPO,
             title=f"fix(sre): automated patch for Issue #{issue['number']}",
             body=f"Auto-generated fix for issue #{issue['number']}.\n\nRisk Score: {pipeline_result.diagnosis.risk_score}/10\n\n{pipeline_result.diagnosis.root_cause_analysis}",
             head_branch=branch_name,
@@ -123,6 +133,7 @@ async def auto_remediate_issue(issue: dict):
         logger.info(f"[POLLER] ✅ Auto-remediation PR opened: {pr_result.get('html_url')}")
 
         await github_client.close_issue(
+            DEFAULT_REPO,
             issue["number"],
             comment=f"🤖 Automatically fixed by Sentinel SRE. See {pr_result.get('html_url')} for the patch and sandbox verification proof.",
         )
@@ -199,7 +210,7 @@ def triage_issue(request: TriageRequest):
 @app.get("/api/issues")
 async def get_issues():
     try:
-        issues = await github_client.list_open_issues()
+        issues = await github_client.list_open_issues(DEFAULT_REPO)
         return {"issues": issues}
     except Exception as e:
         raise HTTPException(
@@ -242,10 +253,11 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
             )
 
         branch_name = f"fix/issue-{request.issue_number}-auto-remediation"
-        base_sha = await github_client.get_default_branch_sha()
+        base_sha = await github_client.get_default_branch_sha(DEFAULT_REPO)
 
-        await github_client.create_branch(branch_name, base_sha)
+        await github_client.create_branch(DEFAULT_REPO, branch_name, base_sha)
         await github_client.create_or_update_file(
+            repo_full_name=DEFAULT_REPO,
             file_path=pipeline_result.remediation.target_file,
             content=pipeline_result.remediation.code_fix,
             commit_message=f"fix: automated patch for issue #{request.issue_number}",
@@ -253,6 +265,7 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
         )
 
         await github_client.create_or_update_file(
+            repo_full_name=DEFAULT_REPO,
             file_path=f"tests/{pipeline_result.test_generation.test_file_name}",
             content=pipeline_result.test_generation.test_code,
             commit_message=f"test: add automated unit test for issue #{request.issue_number}",
@@ -276,12 +289,14 @@ async def remediate_and_open_pr(request: PRAutomationRequest):
 ```
                 """
         pr_result = await github_client.create_pull_request(
+            repo_full_name=DEFAULT_REPO,
             title=f"fix(sre): automated patch for Issue #{request.issue_number}",
             body=pr_body,
             head_branch=branch_name,
         )
 
         await github_client.close_issue(
+            DEFAULT_REPO,
             request.issue_number,
             comment=f"🤖 Automatically fixed. See {pr_result.get('html_url')} for the patch and sandbox verification proof.",
         )
@@ -326,12 +341,12 @@ async def github_webhook(request: Request):
 @app.get("/api/issues/{issue_number}/context")
 async def get_issue_context(issue_number: int):
     """Best-effort auto-resolution of the source file relevant to a GitHub issue."""
-    issue = await github_client.get_issue(issue_number)
+    issue = await github_client.get_issue(DEFAULT_REPO, issue_number)
     body = issue.get("body", "") or ""
 
     # Tier 1: issue body mentions an explicit file path
     for path in extract_candidate_file_paths(body):
-        content = await github_client.get_file_content(path)
+        content = await github_client.get_file_content(DEFAULT_REPO, path)
         if content:
             return {
                 "source_code": content,
@@ -341,10 +356,10 @@ async def get_issue_context(issue_number: int):
 
     # Tier 2: issue body mentions a function name — search the repo for it
     for func_name in extract_candidate_function_names(body):
-        results = await github_client.search_code(func_name)
+        results = await github_client.search_code(DEFAULT_REPO, func_name)
         if results:
             path = results[0]["path"]
-            content = await github_client.get_file_content(path)
+            content = await github_client.get_file_content(DEFAULT_REPO, path)
             if content:
                 return {
                     "source_code": content,
