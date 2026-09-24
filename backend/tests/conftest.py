@@ -2,12 +2,43 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
-from app.db.base import Base
-from app.schemas.agent import (
+
+
+def _use_isolated_test_database() -> None:
+    """Point the whole app at `<db>_test` before anything binds an engine.
+
+    The tests assume empty tables, so they must not share a database with a
+    running dev stack (docker compose seeds real repos and subscribers into it).
+    TEST_DATABASE_URL wins if set; otherwise the name is derived from
+    DATABASE_URL and the database is created on first use. This has to run
+    before app.db.session is imported, which is why it sits above the other
+    app imports."""
+    explicit = os.environ.get("TEST_DATABASE_URL")
+    original = make_url(settings.DATABASE_URL)
+    target = make_url(explicit) if explicit else original.set(database=f"{original.database}_test")
+
+    if target.database != original.database:
+        admin = create_engine(original, isolation_level="AUTOCOMMIT")
+        with admin.connect() as conn:
+            exists = conn.execute(
+                text("SELECT 1 FROM pg_database WHERE datname = :n"), {"n": target.database}
+            ).scalar()
+            if not exists:
+                conn.execute(text(f'CREATE DATABASE "{target.database}"'))
+        admin.dispose()
+
+    settings.DATABASE_URL = target.render_as_string(hide_password=False)
+
+
+_use_isolated_test_database()
+
+from app.db.base import Base  # noqa: E402
+from app.schemas.agent import (  # noqa: E402
     DiagnosisOutput,
     PipelineResult,
     RemediationOutput,

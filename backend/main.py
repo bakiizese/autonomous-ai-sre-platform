@@ -3,8 +3,10 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -54,6 +56,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def github_error_detail(exc: httpx.HTTPStatusError) -> str:
+    status = exc.response.status_code
+    if exc.response.headers.get("X-RateLimit-Remaining") == "0":
+        return "GitHub rate limit reached — try again once it resets."
+    if status in (401, 403):
+        return (
+            "GitHub refused the request. The GITHUB_TOKEN can read this repo but likely can't "
+            "write to it — it needs Issues, Contents and Pull requests read/write access."
+        )
+    if status == 404:
+        return "GitHub couldn't find that repo or resource — check the name and the token's repo access."
+    return f"GitHub request failed with status {status}."
+
+
+@app.exception_handler(httpx.HTTPStatusError)
+async def github_error_handler(request: Request, exc: httpx.HTTPStatusError):
+    """Every httpx call in the routers is a GitHub call. Without this, a token
+    that's missing a permission surfaces as a bare 500 with no explanation."""
+    logger.error(f"GitHub error on {request.method} {request.url.path}: {exc}")
+    return JSONResponse(status_code=502, content={"detail": github_error_detail(exc)})
+
 
 app.include_router(routes_repos.router)
 app.include_router(routes_issues.router)
