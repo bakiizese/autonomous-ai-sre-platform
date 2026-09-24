@@ -4,12 +4,9 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db
 from app.db.models import Issue, IssueOrigin, Repo, RunTriggerSource
 from app.schemas.api import IssueOut, RemediationRunOut
-from app.services.context_resolver import (
-    extract_candidate_file_paths,
-    extract_candidate_function_names,
-)
 from app.services.github_client import github_client
 from app.services.remediation_service import start_remediation_run
+from app.services.source_context_service import resolve_source_context
 
 router = APIRouter(prefix="/api/repos", tags=["issues"])
 
@@ -60,22 +57,7 @@ async def get_issue_context(repo_id: int, issue_number: int, db: Session = Depen
     """Best-effort auto-resolution of the source file relevant to a GitHub issue."""
     repo = _get_repo_or_404(db, repo_id)
     issue = await github_client.get_issue(repo.full_name, issue_number)
-    body = issue.get("body", "") or ""
-
-    for path in extract_candidate_file_paths(body):
-        content = await github_client.get_file_content(repo.full_name, path)
-        if content:
-            return {"source_code": content, "resolved_path": path, "method": "direct_path"}
-
-    for func_name in extract_candidate_function_names(body):
-        results = await github_client.search_code(repo.full_name, func_name)
-        if results:
-            path = results[0]["path"]
-            content = await github_client.get_file_content(repo.full_name, path)
-            if content:
-                return {"source_code": content, "resolved_path": path, "method": "code_search"}
-
-    return {"source_code": "", "resolved_path": None, "method": "not_found"}
+    return await resolve_source_context(repo.full_name, issue.get("body", "") or "")
 
 
 @router.post("/{repo_id}/issues/{issue_number}/triage", response_model=RemediationRunOut)
