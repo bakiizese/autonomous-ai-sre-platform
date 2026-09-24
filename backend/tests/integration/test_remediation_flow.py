@@ -9,6 +9,8 @@ lifespan just never runs.
 """
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -155,3 +157,34 @@ def test_baseline_ingestion_does_not_trigger_remediation(client, db_session):
     assert len(issues_resp.json()) == 2
     assert all(i["latest_remediation_run_id"] is None for i in issues_resp.json())
     mock_pipeline.assert_not_called()
+
+
+def _github_error(status, headers=None):
+    request = httpx.Request("POST", "https://api.github.com/repos/o/sandbox/issues")
+    response = httpx.Response(status, request=request, headers=headers or {})
+    return httpx.HTTPStatusError(f"{status}", request=request, response=response)
+
+
+def test_github_permission_error_is_explained_not_a_bare_500(client, db_session):
+    repo = Repo(owner="o", name="sandbox", full_name="o/sandbox", repo_type=RepoType.sandbox)
+    db_session.add(repo)
+    db_session.commit()
+
+    with patch("app.api.routes_demo.github_client.create_issue", AsyncMock(side_effect=_github_error(403))):
+        resp = client.post(f"/api/repos/{repo.id}/demo/inject-bug")
+
+    assert resp.status_code == 502
+    assert "Issues, Contents and Pull requests" in resp.json()["detail"]
+
+
+def test_github_rate_limit_error_is_reported_as_rate_limit(client, db_session):
+    repo = Repo(owner="o", name="sandbox", full_name="o/sandbox", repo_type=RepoType.sandbox)
+    db_session.add(repo)
+    db_session.commit()
+
+    err = _github_error(403, {"X-RateLimit-Remaining": "0"})
+    with patch("app.api.routes_demo.github_client.create_issue", AsyncMock(side_effect=err)):
+        resp = client.post(f"/api/repos/{repo.id}/demo/inject-bug")
+
+    assert resp.status_code == 502
+    assert "rate limit" in resp.json()["detail"].lower()
