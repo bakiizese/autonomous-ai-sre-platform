@@ -102,6 +102,10 @@ npm run dev
 
 Visit `http://localhost:5173`.
 
+### Hosting it
+
+See [`DEPLOY.md`](DEPLOY.md) for a free-tier setup on Render + Neon, including what to know before making it public.
+
 ### Configuration
 
 The important variables (full list and notes in [`backend/README.md`](backend/README.md)):

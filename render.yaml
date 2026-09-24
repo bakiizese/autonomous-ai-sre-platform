@@ -1,0 +1,54 @@
+# Render blueprint: New > Blueprint > pick this repo. Secrets are left blank
+# (sync: false) and entered in the Render dashboard, never committed.
+# Database: use an external Postgres (Neon free tier) — Render's free Postgres expires.
+# See DEPLOY.md for the full walkthrough.
+services:
+  - type: web
+    name: sentinel-sre-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: DATABASE_URL          # Neon connection string; postgres:// is fine
+        sync: false
+      - key: ALLOWED_ORIGINS       # the web service URL below, e.g. https://sentinel-sre-web.onrender.com
+        sync: false
+      - key: SANDBOX_REPOS
+        value: bakiizese/sentinel-sre-playground
+      - key: GEMINI_MODEL_ID
+        value: gemini-2.5-flash
+      - key: ADMIN_ALERT_EMAIL
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+
+  - type: web
+    name: sentinel-sre-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      # React Router client-side routes (/dashboard, /about) must serve index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: VITE_API_BASE_URL     # the api service URL, e.g. https://sentinel-sre-api.onrender.com
+        sync: false
+      - key: VITE_WALKTHROUGH_VIDEO_URL
+        sync: false

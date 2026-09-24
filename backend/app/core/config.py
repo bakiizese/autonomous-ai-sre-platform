@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +38,17 @@ class Settings(BaseSettings):
     ADMIN_ALERT_EMAIL: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @field_validator("DATABASE_URL")
+    @classmethod
+    def _use_psycopg_driver(cls, value: str) -> str:
+        """Managed Postgres (Render, Neon, Heroku...) hands out plain postgres:// or
+        postgresql:// URLs, which SQLAlchemy would resolve to the psycopg2 driver we
+        don't install. Pin them to psycopg 3."""
+        for prefix in ("postgres://", "postgresql://"):
+            if value.startswith(prefix):
+                return "postgresql+psycopg://" + value[len(prefix):]
+        return value
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
