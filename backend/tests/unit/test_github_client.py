@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from app.services.github_client import GitHubClient, github_client
+from app.services.github_client import GitHubClient
 
 REPO = "owner/test-repo"
 

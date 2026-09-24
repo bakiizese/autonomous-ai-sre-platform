@@ -1,0 +1,6 @@
+extend-exclude = ["alembic/versions"]
+
+[lint]
+select = ["E", "F"]
+# long lines: the codebase already has plenty and they're mostly prose in prompts/strings
+ignore = ["E501"]

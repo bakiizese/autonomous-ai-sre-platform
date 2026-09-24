@@ -9,3 +9,7 @@ sqlalchemy
 alembic
 psycopg[binary]
 langgraph
+
+# The sandbox runner shells out to `python -m pytest` to verify generated fixes,
+# so pytest is a runtime dependency, not just a dev one.
+pytest

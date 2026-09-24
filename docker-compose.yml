@@ -6,6 +6,7 @@ services:
       POSTGRES_PASSWORD: sre
       POSTGRES_DB: sre
     ports:
+      # 5433 on the host so it doesn't collide with a Postgres already running locally
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -14,6 +15,34 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  backend:
+    build: ./backend
+    # GEMINI_API_KEY, GITHUB_TOKEN, SANDBOX_REPOS, SMTP_* etc. come from backend/.env
+    # (copy backend/.env.example). Optional here so `docker compose config` works without it.
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      # Inside the compose network Postgres is `postgres:5432`, not localhost:5433.
+      DATABASE_URL: postgresql+psycopg://sre:sre@postgres:5432/sre
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the bundle at build time; must be reachable from the visitor's browser.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+        VITE_WALKTHROUGH_VIDEO_URL: ${VITE_WALKTHROUGH_VIDEO_URL:-}
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:
