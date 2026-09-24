@@ -1,9 +1,10 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models import Issue, RemediationRun, Repo, RepoType, RunStatus, RunTriggerSource
 from app.services.agent_engine import run_sre_pipeline
 from app.services.github_client import github_client
@@ -17,6 +18,19 @@ class ApprovalError(Exception):
     """Raised when approve/reject is called on a run that isn't awaiting approval."""
 
 
+DAILY_CAP_MESSAGE = "The demo has reached its daily run limit (free-tier API quota). Try again tomorrow."
+
+
+def daily_run_cap_reached(db: Session) -> bool:
+    """Rolling-24h ceiling on pipeline runs from any source — visitors clicking,
+    the poller, or strangers opening issues on the public sandbox repo."""
+    if settings.DAILY_RUN_CAP <= 0:
+        return False
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    started = db.query(RemediationRun).filter(RemediationRun.started_at >= since).count()
+    return started >= settings.DAILY_RUN_CAP
+
+
 async def start_remediation_run(
     db: Session, issue: Issue, repo: Repo, trigger_source: RunTriggerSource
 ) -> RemediationRun:
@@ -27,6 +41,21 @@ async def start_remediation_run(
     is the separate, human-confirmed action that actually writes to GitHub.
     For an inspected (read-only) repo, stop_after_diagnosis structurally
     prevents the pipeline from ever generating a fix at all."""
+    if daily_run_cap_reached(db):
+        run = RemediationRun(
+            issue_id=issue.id,
+            repo_id=repo.id,
+            trigger_source=trigger_source,
+            status=RunStatus.failed,
+            error_message=DAILY_CAP_MESSAGE,
+            completed_at=datetime.now(timezone.utc),
+        )
+        db.add(run)
+        db.flush()
+        issue.latest_remediation_run_id = run.id
+        db.commit()
+        return run
+
     run = RemediationRun(
         issue_id=issue.id,
         repo_id=repo.id,

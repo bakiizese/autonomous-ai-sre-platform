@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.api.limits import limit_light
 from app.db.models import Repo
 from app.schemas.api import SubscribeRequest
 from app.services import notification_service
@@ -10,7 +11,7 @@ from app.services import notification_service
 router = APIRouter(tags=["subscribers"])
 
 
-@router.post("/api/repos/{repo_id}/subscribe")
+@router.post("/api/repos/{repo_id}/subscribe", dependencies=[Depends(limit_light)])
 def subscribe(repo_id: int, request: SubscribeRequest, db: Session = Depends(get_db)):
     repo = db.get(Repo, repo_id)
     if repo is None:

@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -19,6 +19,7 @@ from app.api import (
     routes_status,
     routes_subscribers,
 )
+from app.api.limits import limit_costly
 from app.core.config import settings
 from app.db.session import SessionLocal
 from app.schemas.agent import PipelineResult, VerificationResult
@@ -112,7 +113,7 @@ def read_root():
     return {"status": "online", "service": "Autonomous AI SRE Core Engine", "database": db_status}
 
 
-@app.post("/api/triage", response_model=PipelineResult)
+@app.post("/api/triage", response_model=PipelineResult, dependencies=[Depends(limit_costly)])
 def triage_issue(request: TriageRequest):
     """Ad hoc scratchpad diagnosis — unpersisted, doesn't touch a repo."""
     try:
@@ -122,7 +123,7 @@ def triage_issue(request: TriageRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/verify", response_model=VerificationResult)
+@app.post("/api/verify", response_model=VerificationResult, dependencies=[Depends(limit_costly)])
 def verify_patch(request: VerificationRequest):
     """Ad hoc sandbox check of pasted code — unpersisted."""
     try:

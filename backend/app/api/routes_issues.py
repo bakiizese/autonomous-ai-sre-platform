@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.api.limits import limit_costly, limit_light
 from app.db.models import Issue, IssueOrigin, Repo, RunTriggerSource
 from app.schemas.api import IssueOut, RemediationRunOut
 from app.services.github_client import github_client
@@ -52,7 +53,7 @@ def list_repo_issues(
     return [_issue_to_out(i) for i in issues]
 
 
-@router.get("/{repo_id}/issues/{issue_number}/context")
+@router.get("/{repo_id}/issues/{issue_number}/context", dependencies=[Depends(limit_light)])
 async def get_issue_context(repo_id: int, issue_number: int, db: Session = Depends(get_db)):
     """Best-effort auto-resolution of the source file relevant to a GitHub issue."""
     repo = _get_repo_or_404(db, repo_id)
@@ -60,7 +61,7 @@ async def get_issue_context(repo_id: int, issue_number: int, db: Session = Depen
     return await resolve_source_context(repo.full_name, issue.get("body", "") or "")
 
 
-@router.post("/{repo_id}/issues/{issue_number}/triage", response_model=RemediationRunOut)
+@router.post("/{repo_id}/issues/{issue_number}/triage", response_model=RemediationRunOut, dependencies=[Depends(limit_costly)])
 async def trigger_manual_triage(repo_id: int, issue_number: int, db: Session = Depends(get_db)):
     repo = _get_repo_or_404(db, repo_id)
     issue = db.query(Issue).filter_by(repo_id=repo.id, issue_number=issue_number).one_or_none()

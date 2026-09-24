@@ -52,6 +52,17 @@ from app.schemas.agent import (  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def reset_rate_limits():
+    """The limiter keeps per-IP counters in process memory; without this the
+    TestClient (always the same 'IP') would trip limits across unrelated tests."""
+    from app.api import limits
+
+    limits.reset()
+    yield
+    limits.reset()
+
+
+@pytest.fixture(autouse=True)
 def mock_env_vars():
     """
     Automatically mock essential environment variables for ALL tests

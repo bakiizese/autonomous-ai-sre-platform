@@ -2,16 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
+from app.api.limits import limit_costly
 from app.db.models import Issue, IssueOrigin, Repo, RepoType, RunTriggerSource
 from app.schemas.api import DemoInjectRequest, RemediationRunOut
 from app.services.demo_scenarios import get_scenario
 from app.services.github_client import github_client
-from app.services.remediation_service import start_remediation_run
+from app.services.remediation_service import DAILY_CAP_MESSAGE, daily_run_cap_reached, start_remediation_run
 
 router = APIRouter(prefix="/api/repos", tags=["demo"])
 
 
-@router.post("/{repo_id}/demo/inject-bug", response_model=RemediationRunOut)
+@router.post("/{repo_id}/demo/inject-bug", response_model=RemediationRunOut, dependencies=[Depends(limit_costly)])
 async def inject_demo_bug(
     repo_id: int, request: DemoInjectRequest = DemoInjectRequest(), db: Session = Depends(get_db)
 ):
@@ -24,6 +25,9 @@ async def inject_demo_bug(
         raise HTTPException(status_code=404, detail="Repo not found")
     if repo.repo_type != RepoType.sandbox:
         raise HTTPException(status_code=403, detail="Demo bug injection is only available on sandbox repos.")
+
+    if daily_run_cap_reached(db):
+        raise HTTPException(status_code=429, detail=DAILY_CAP_MESSAGE)
 
     try:
         scenario = get_scenario(request.scenario_id)

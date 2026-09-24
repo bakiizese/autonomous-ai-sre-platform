@@ -152,6 +152,11 @@ POLL_INTERVAL_SECONDS=30
 CRITICAL_RISK_THRESHOLD=8      # alert when risk score is strictly above this
 AGENT_MAX_FIX_RETRIES=1        # extra fix attempts after a failed verification (0 disables)
 
+# Public-demo abuse protection (0 disables a limit)
+RATE_LIMIT_COSTLY_PER_10MIN=6  # per visitor: inject / triage / scratchpad / verify
+RATE_LIMIT_LIGHT_PER_10MIN=30  # per visitor: connect / refresh / subscribe / context
+DAILY_RUN_CAP=50               # total pipeline runs per rolling 24h, from any source
+
 # Alert emails are always sent from this account (skipped silently if SMTP_HOST is unset)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
@@ -204,6 +209,16 @@ The Docker image runs `alembic upgrade head` itself on every start (see `docker-
 | POST | `/api/triage` | Ad hoc: run the graph on pasted text; unpersisted, touches no repo |
 | POST | `/api/verify` | Ad hoc: sandbox-verify pasted code and tests |
 | POST | `/api/webhook/github` | Placeholder — detection is poller-driven; signed webhooks are a V2 item |
+
+---
+
+## Running this in public
+
+Anyone can hit the demo, and part of what it runs is model-written code, so a few protections are on by default:
+
+- **Sandbox:** generated tests run with a scrubbed environment (no `GITHUB_TOKEN`, `GEMINI_API_KEY` or SMTP password), CPU/memory/file-size limits, and — when the server runs as root, as in Docker — as the unprivileged `nobody` user, which also stops them reading the server's `/proc` environment. This is process-level isolation, **not** a container: it does not block network access. Stronger isolation (gVisor, Firecracker) is a V2 item.
+- **Per-visitor limits:** costly actions (which spend Gemini quota or run the sandbox) and lighter GitHub-calling ones each have a per-IP limit per 10 minutes. Counters are in process memory, which is fine for a single instance. Run uvicorn with `--proxy-headers` behind a proxy so the real visitor IP is used (the Docker entrypoint does).
+- **Daily cap:** `DAILY_RUN_CAP` bounds total pipeline runs per rolling 24h from any source, including strangers opening issues on a public sandbox repo. When it's hit, runs fail with a clear message and the inject button returns 429 without creating a GitHub issue.
 
 ---
 

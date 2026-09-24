@@ -19,6 +19,14 @@ class Settings(BaseSettings):
     CRITICAL_RISK_THRESHOLD: int = 8
     AGENT_MAX_FIX_RETRIES: int = 1
 
+    # Abuse protection for the public demo. Per visitor (client IP) per 10 minutes;
+    # "costly" actions spend Gemini quota or run the sandbox, "light" ones just call GitHub.
+    # 0 disables a limit. DAILY_RUN_CAP bounds total pipeline runs per rolling 24h,
+    # which also covers strangers opening issues on the public sandbox repo.
+    RATE_LIMIT_COSTLY_PER_10MIN: int = 6
+    RATE_LIMIT_LIGHT_PER_10MIN: int = 30
+    DAILY_RUN_CAP: int = 50
+
     # Email alerting for critical-risk diagnoses
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
