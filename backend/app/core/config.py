@@ -37,18 +37,32 @@ class Settings(BaseSettings):
     ALERT_EMAIL_FROM: str = ""  # defaults to SMTP_USER if left blank
     ADMIN_ALERT_EMAIL: str = ""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     @field_validator("DATABASE_URL")
     @classmethod
-    def _use_psycopg_driver(cls, value: str) -> str:
+    def _normalize_database_url(cls, value: str) -> str:
         """Managed Postgres (Render, Neon, Heroku...) hands out plain postgres:// or
         postgresql:// URLs, which SQLAlchemy would resolve to the psycopg2 driver we
-        don't install. Pin them to psycopg 3."""
+        don't install, so pin them to psycopg 3. Also forgive the usual copy-paste
+        slips (quotes, a leading `psql`), and fail with a clear message for anything
+        else — the raw SQLAlchemy error just says "could not parse URL". The value is
+        deliberately never included in the message: it may contain the password."""
+        url = value.strip()
+        if url.startswith("psql"):
+            url = url[4:].strip()
+        url = url.strip("'\"").strip()
+
         for prefix in ("postgres://", "postgresql://"):
-            if value.startswith(prefix):
-                return "postgresql+psycopg://" + value[len(prefix):]
-        return value
+            if url.startswith(prefix):
+                return "postgresql+psycopg://" + url[len(prefix):]
+        if url.startswith("postgresql+psycopg://"):
+            return url
+
+        raise ValueError(
+            "DATABASE_URL is empty or not a Postgres URL. It must be one line starting with "
+            "postgresql:// — check for a blank value, a placeholder, or the wrong text pasted."
+        )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
