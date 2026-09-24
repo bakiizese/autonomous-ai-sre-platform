@@ -199,3 +199,33 @@ async def test_start_remediation_run_survives_source_lookup_failure(db_session):
 
         assert mock_pipeline.call_args.args[1] == ""
         assert run.status == RunStatus.awaiting_approval
+
+
+@pytest.mark.asyncio
+async def test_daily_cap_blocks_run_without_calling_gemini(db_session):
+    repo, issue = _make_issue(db_session, RepoType.sandbox)
+
+    with patch.object(remediation_service.settings, "DAILY_RUN_CAP", 1), \
+         patch.object(remediation_service, "run_sre_pipeline", MagicMock()) as mock_pipeline:
+        first = RemediationRun(issue_id=issue.id, repo_id=repo.id, trigger_source=RunTriggerSource.poller, status=RunStatus.pr_opened)
+        db_session.add(first)
+        db_session.commit()
+
+        run = await remediation_service.start_remediation_run(db_session, issue, repo, RunTriggerSource.poller)
+
+        assert run.status == RunStatus.failed
+        assert run.error_message == remediation_service.DAILY_CAP_MESSAGE
+        mock_pipeline.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_daily_cap_zero_means_unlimited(db_session):
+    repo, issue = _make_issue(db_session, RepoType.inspected)
+    state = {"diagnosis": DIAGNOSIS, "fix_attempt": 0, "node_trace": []}
+
+    with patch.object(remediation_service.settings, "DAILY_RUN_CAP", 0), \
+         patch.object(remediation_service, "run_sre_pipeline", MagicMock(return_value=state)), \
+         patch.object(remediation_service, "notify_subscribers"):
+        run = await remediation_service.start_remediation_run(db_session, issue, repo, RunTriggerSource.manual_dashboard)
+
+        assert run.status == RunStatus.diagnosed

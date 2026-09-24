@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_session_id
+from app.api.limits import limit_light
 from app.db.models import Repo
 from app.schemas.api import RepoConnectRequest, RepoOut
 from app.services import repo_service
@@ -11,7 +12,7 @@ from app.services import repo_service
 router = APIRouter(prefix="/api/repos", tags=["repos"])
 
 
-@router.post("/connect", response_model=RepoOut)
+@router.post("/connect", response_model=RepoOut, dependencies=[Depends(limit_light)])
 async def connect_repo(
     request: RepoConnectRequest,
     db: Session = Depends(get_db),
@@ -36,7 +37,7 @@ def get_repo(repo_id: int, db: Session = Depends(get_db)):
     return repo
 
 
-@router.post("/{repo_id}/refresh-issues")
+@router.post("/{repo_id}/refresh-issues", dependencies=[Depends(limit_light)])
 async def refresh_issues(repo_id: int, db: Session = Depends(get_db)):
     repo = db.get(Repo, repo_id)
     if repo is None:

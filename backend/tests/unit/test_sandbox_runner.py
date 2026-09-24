@@ -124,3 +124,64 @@ def test_preflight_verification_file_creation(sample_verification_args):
     # Confirm temporary directory was cleaned up after exiting context
     assert recorded_temp_dir is not None
     assert not os.path.exists(recorded_temp_dir)
+
+
+def test_sandbox_does_not_inherit_server_secrets(monkeypatch):
+    """Generated code must never see the server's environment (API keys, tokens)."""
+    monkeypatch.setenv("FAKE_GITHUB_TOKEN", "ghp_should_never_leak")
+
+    result = run_preflight_verification(
+        target_file_rel_path="m.py",
+        remediated_code="x = 1\n",
+        test_file_name="test_env.py",
+        generated_test_code=(
+            "import os\n"
+            "def test_env():\n"
+            "    print('SEEN=', os.environ.get('FAKE_GITHUB_TOKEN'))\n"
+            "    assert False\n"
+        ),
+    )
+
+    assert "SEEN= None" in result.stdout
+    assert "ghp_should_never_leak" not in result.stdout + result.stderr
+
+
+def test_sandbox_stops_runaway_code():
+    result = run_preflight_verification(
+        target_file_rel_path="m.py",
+        remediated_code="x = 1\n",
+        test_file_name="test_loop.py",
+        generated_test_code="def test_loop():\n    while True:\n        pass\n",
+        timeout_seconds=2,
+    )
+
+    assert result.passed is False
+    assert "timed out" in result.stderr
+
+
+def test_sandbox_refuses_huge_allocation():
+    result = run_preflight_verification(
+        target_file_rel_path="m.py",
+        remediated_code="x = 1\n",
+        test_file_name="test_mem.py",
+        generated_test_code="def test_mem():\n    bytearray(3 * 1024 ** 3)\n",
+    )
+
+    assert result.passed is False
+    assert "MemoryError" in result.stdout + result.stderr
+
+
+@patch("os.chown")
+@patch("os.geteuid", return_value=0)
+@patch("subprocess.run")
+def test_sandbox_drops_to_unprivileged_user_when_server_is_root(
+    mock_subprocess_run, _mock_geteuid, _mock_chown, sample_verification_args
+):
+    mock_subprocess_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+    run_preflight_verification(**sample_verification_args)
+
+    _, kwargs = mock_subprocess_run.call_args
+    assert kwargs["user"] == 65534
+    assert kwargs["group"] == 65534
+    assert "GEMINI_API_KEY" not in kwargs["env"]

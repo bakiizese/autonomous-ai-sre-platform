@@ -188,3 +188,32 @@ def test_github_rate_limit_error_is_reported_as_rate_limit(client, db_session):
 
     assert resp.status_code == 502
     assert "rate limit" in resp.json()["detail"].lower()
+
+
+def test_inject_bug_is_rate_limited_per_visitor(client, db_session):
+    repo = Repo(owner="o", name="sandbox", full_name="o/sandbox", repo_type=RepoType.sandbox)
+    db_session.add(repo)
+    db_session.commit()
+
+    with patch("app.api.limits.settings") as mock_settings, \
+         patch("app.api.routes_demo.github_client.create_issue", AsyncMock(side_effect=_github_error(403))):
+        mock_settings.RATE_LIMIT_COSTLY_PER_10MIN = 2
+        codes = [client.post(f"/api/repos/{repo.id}/demo/inject-bug").status_code for _ in range(3)]
+
+    assert codes == [502, 502, 429]
+
+
+def test_inject_bug_refused_when_daily_cap_reached(client, db_session):
+    repo = Repo(owner="o", name="sandbox", full_name="o/sandbox", repo_type=RepoType.sandbox)
+    db_session.add(repo)
+    db_session.commit()
+
+    create_issue = AsyncMock()
+    with patch.object(remediation_service.settings, "DAILY_RUN_CAP", 0), \
+         patch("app.api.routes_demo.daily_run_cap_reached", return_value=True), \
+         patch("app.api.routes_demo.github_client.create_issue", create_issue):
+        resp = client.post(f"/api/repos/{repo.id}/demo/inject-bug")
+
+    assert resp.status_code == 429
+    assert "daily run limit" in resp.json()["detail"]
+    create_issue.assert_not_called()  # no GitHub issue is created that can't be processed
