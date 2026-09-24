@@ -1,4 +1,3 @@
-import pytest
 
 from app.services.context_resolver import (
     _EXCLUDED_NAMES,

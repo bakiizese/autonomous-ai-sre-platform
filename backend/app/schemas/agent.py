@@ -1,6 +1,5 @@
 #pydantic schemas for multi-agent outputs
 from pydantic import BaseModel, Field
-from typing import Optional
 
 class DiagnosisOutput(BaseModel):
     summary: str = Field(description="A brief summary of the issue.")
